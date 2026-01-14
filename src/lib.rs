@@ -10,6 +10,7 @@ use wasm_bindgen::prelude::*;
 use web_sys::HtmlCanvasElement;
 
 mod app;
+mod transform;
 
 use app::AppState;
 
@@ -114,6 +115,44 @@ impl ViewerHandle {
     pub fn notify_resize(&self, width: u32, height: u32) {
         let mut state = self.state.borrow_mut();
         state.set_container_size(width, height);
+    }
+
+    /// Zoom in by one step (1.25x)
+    #[wasm_bindgen(js_name = zoomIn)]
+    pub fn zoom_in(&self) {
+        let mut state = self.state.borrow_mut();
+        // Use a default viewport center - the actual center will be calculated in the UI
+        let center = egui::pos2(400.0, 300.0);
+        state.zoom_in(None, center);
+    }
+
+    /// Zoom out by one step (1/1.25x)
+    #[wasm_bindgen(js_name = zoomOut)]
+    pub fn zoom_out(&self) {
+        let mut state = self.state.borrow_mut();
+        let center = egui::pos2(400.0, 300.0);
+        state.zoom_out(None, center);
+    }
+
+    /// Reset zoom and pan to fit-to-view
+    #[wasm_bindgen(js_name = zoomToFit)]
+    pub fn zoom_to_fit(&self) {
+        let mut state = self.state.borrow_mut();
+        state.zoom_to_fit();
+    }
+
+    /// Set zoom level directly (1.0 = fit to view)
+    #[wasm_bindgen(js_name = setZoom)]
+    pub fn set_zoom(&self, level: f32) {
+        let mut state = self.state.borrow_mut();
+        let transform = state.transform_mut();
+        transform.zoom = level.clamp(transform::MIN_ZOOM, transform::MAX_ZOOM);
+    }
+
+    /// Get current zoom level (1.0 = fit to view)
+    #[wasm_bindgen(js_name = getZoom)]
+    pub fn get_zoom(&self) -> f32 {
+        self.state.borrow().zoom_level()
     }
 }
 

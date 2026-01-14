@@ -1,6 +1,8 @@
 //! egui application state and rendering logic
 
-use egui::{Color32, ColorImage, TextureHandle, TextureOptions};
+use egui::{Color32, ColorImage, Key, PointerButton, TextureHandle, TextureOptions, Vec2};
+
+use crate::transform::ViewTransform;
 
 /// Shared state for a viewer instance
 pub struct AppState {
@@ -21,6 +23,8 @@ pub struct AppState {
     hover_info: Option<(u32, u32, f64)>,
     /// Whether the source data is integer-typed (for display formatting)
     is_integer: bool,
+    /// Pan/zoom transformation state
+    transform: ViewTransform,
 }
 
 impl AppState {
@@ -36,11 +40,16 @@ impl AppState {
             texture_dirty: false,
             hover_info: None,
             is_integer: false,
+            transform: ViewTransform::new(),
         }
     }
 
     /// Set new image data, computing min/max for auto-scaling
+    /// Pan is reset if dimensions change; zoom is always preserved
     pub fn set_image(&mut self, pixels: Vec<f64>, width: u32, height: u32, is_integer: bool) {
+        // Check if dimensions changed
+        let dimensions_changed = width != self.width || height != self.height;
+
         // Compute min/max, ignoring NaN values
         let mut min_val = f64::INFINITY;
         let mut max_val = f64::NEG_INFINITY;
@@ -74,6 +83,11 @@ impl AppState {
         self.max_val = max_val;
         self.texture_dirty = true;
         self.is_integer = is_integer;
+
+        // Only reset pan if dimensions changed; always keep zoom
+        if dimensions_changed {
+            self.transform.reset_pan();
+        }
     }
 
     /// Update container size
@@ -153,6 +167,41 @@ impl AppState {
     pub fn is_integer(&self) -> bool {
         self.is_integer
     }
+
+    /// Get mutable reference to transform
+    pub fn transform_mut(&mut self) -> &mut ViewTransform {
+        &mut self.transform
+    }
+
+    /// Get reference to transform
+    pub fn transform(&self) -> &ViewTransform {
+        &self.transform
+    }
+
+    /// Zoom in by one step
+    pub fn zoom_in(&mut self, center: Option<egui::Pos2>, viewport_center: egui::Pos2) {
+        self.transform.zoom_in(center, viewport_center);
+    }
+
+    /// Zoom out by one step
+    pub fn zoom_out(&mut self, center: Option<egui::Pos2>, viewport_center: egui::Pos2) {
+        self.transform.zoom_out(center, viewport_center);
+    }
+
+    /// Reset to fit-to-view
+    pub fn zoom_to_fit(&mut self) {
+        self.transform.reset();
+    }
+
+    /// Get current zoom level (1.0 = fit to view)
+    pub fn zoom_level(&self) -> f32 {
+        self.transform.zoom
+    }
+
+    /// Check if view is at default state
+    pub fn is_default_view(&self) -> bool {
+        self.transform.is_default()
+    }
 }
 
 impl Default for AppState {
@@ -202,6 +251,9 @@ impl eframe::App for ViewerApp {
             }
         }
 
+        // Handle keyboard shortcuts (before panel to capture globally)
+        self.handle_keyboard_input(ctx);
+
         egui::CentralPanel::default().show(ctx, |ui| {
             let state_ref = self.state.borrow();
 
@@ -213,14 +265,15 @@ impl eframe::App for ViewerApp {
             }
 
             let (img_width, img_height) = state_ref.dimensions();
+            let transform = state_ref.transform().clone();
             drop(state_ref); // Release borrow for mutable access later
 
-            // Calculate image display size to fit in available space while maintaining aspect ratio
+            // Calculate base image display size (fit-to-view size)
             let available_size = ui.available_size();
             let img_aspect = img_width as f32 / img_height as f32;
             let available_aspect = available_size.x / available_size.y;
 
-            let display_size = if img_aspect > available_aspect {
+            let base_display_size = if img_aspect > available_aspect {
                 // Image is wider than available space
                 egui::vec2(available_size.x, available_size.x / img_aspect)
             } else {
@@ -228,73 +281,237 @@ impl eframe::App for ViewerApp {
                 egui::vec2(available_size.y * img_aspect, available_size.y)
             };
 
-            // Center the image
-            let offset = (available_size - display_size) / 2.0;
-            ui.add_space(offset.y);
+            // Calculate the actual image rect with zoom and pan applied
+            let viewport_rect = ui.max_rect();
+            let image_rect = transform.calculate_image_rect(viewport_rect, base_display_size);
+            let viewport_center = viewport_rect.center();
 
-            ui.horizontal(|ui| {
-                ui.add_space(offset.x);
+            // Allocate the full available space for interaction
+            let (full_rect, response) = ui.allocate_exact_size(
+                available_size,
+                egui::Sense::click_and_drag(),
+            );
 
-                if let Some(texture) = &self.texture {
-                    let response = ui.add(
-                        egui::Image::new(texture)
-                            .fit_to_exact_size(display_size)
-                            .sense(egui::Sense::hover()),
-                    );
+            // Draw the image at the transformed position
+            if let Some(texture) = &self.texture {
+                // Use a painter to draw at arbitrary position
+                let painter = ui.painter_at(full_rect);
+                // Flip Y-axis for FITS convention: Y=0 at bottom
+                // UV coords go from (0,1) at top-left to (1,0) at bottom-right
+                painter.image(
+                    texture.id(),
+                    image_rect,
+                    egui::Rect::from_min_max(egui::pos2(0.0, 1.0), egui::pos2(1.0, 0.0)),
+                    egui::Color32::WHITE,
+                );
+            }
 
-                    // Handle hover to show pixel value
-                    if let Some(hover_pos) = response.hover_pos() {
-                        let image_rect = response.rect;
-
-                        // Convert screen position to image coordinates
-                        let rel_x = (hover_pos.x - image_rect.min.x) / image_rect.width();
-                        let rel_y = (hover_pos.y - image_rect.min.y) / image_rect.height();
-
-                        let img_x = (rel_x * img_width as f32) as u32;
-                        let img_y = (rel_y * img_height as f32) as u32;
-
+            // Handle mouse wheel zoom
+            let zoom_delta = ui.input(|i| i.zoom_delta());
+            if zoom_delta != 1.0 {
+                if let Some(pointer_pos) = ui.input(|i| i.pointer.latest_pos()) {
+                    if response.rect.contains(pointer_pos) {
                         let mut state = self.state.borrow_mut();
-                        if let Some(value) = state.get_pixel_value(img_x, img_y) {
-                            state.set_hover_info(Some((img_x, img_y, value)));
-                        } else {
-                            state.set_hover_info(None);
-                        }
-                    } else {
-                        let mut state = self.state.borrow_mut();
-                        state.set_hover_info(None);
+                        state.transform_mut().zoom_around_point(zoom_delta, pointer_pos, viewport_center);
                     }
                 }
-            });
+            }
+
+            // Handle scroll wheel (for zoom when not using native zoom gesture)
+            let scroll_delta = ui.input(|i| i.raw_scroll_delta);
+            if scroll_delta.y != 0.0 && zoom_delta == 1.0 {
+                // Scroll without pinch gesture - use for zoom centered on cursor
+                if let Some(pointer_pos) = ui.input(|i| i.pointer.latest_pos()) {
+                    if response.rect.contains(pointer_pos) {
+                        // Use smaller step for scroll wheel for finer control
+                        let zoom_factor = if scroll_delta.y > 0.0 {
+                            crate::transform::SCROLL_ZOOM_STEP
+                        } else {
+                            1.0 / crate::transform::SCROLL_ZOOM_STEP
+                        };
+                        let mut state = self.state.borrow_mut();
+                        state.transform_mut().zoom_around_point(zoom_factor, pointer_pos, viewport_center);
+                    }
+                }
+            }
+
+            // Handle pan via drag
+            // Primary click-drag pans by default, middle mouse also pans
+            let should_pan = response.dragged_by(PointerButton::Primary)
+                || response.dragged_by(PointerButton::Middle);
+
+            if should_pan {
+                let drag_delta = response.drag_delta();
+                if drag_delta != Vec2::ZERO {
+                    let mut state = self.state.borrow_mut();
+                    state.transform_mut().pan_by(drag_delta);
+                }
+            }
+
+            // Handle alt+click to center on point
+            let modifiers = ui.input(|i| i.modifiers);
+            if response.clicked() && modifiers.alt {
+                if let Some(click_pos) = response.interact_pointer_pos() {
+                    let state_ref = self.state.borrow();
+                    let transform = state_ref.transform();
+                    if let Some((img_x, img_y)) = transform.screen_to_image(
+                        click_pos,
+                        image_rect,
+                        (img_width, img_height),
+                    ) {
+                        drop(state_ref);
+                        let mut state = self.state.borrow_mut();
+                        state.transform_mut().center_on_image_point(
+                            egui::pos2(img_x as f32, img_y as f32),
+                            egui::vec2(img_width as f32, img_height as f32),
+                            available_size,
+                            egui::Rect::from_center_size(viewport_center, base_display_size),
+                        );
+                    }
+                }
+            }
+
+            // Handle hover to show pixel value
+            if let Some(hover_pos) = response.hover_pos() {
+                let state_ref = self.state.borrow();
+                let transform = state_ref.transform();
+                if let Some((img_x, img_y)) = transform.screen_to_image(
+                    hover_pos,
+                    image_rect,
+                    (img_width, img_height),
+                ) {
+                    drop(state_ref);
+                    let mut state = self.state.borrow_mut();
+                    if let Some(value) = state.get_pixel_value(img_x, img_y) {
+                        state.set_hover_info(Some((img_x, img_y, value)));
+                    } else {
+                        state.set_hover_info(None);
+                    }
+                } else {
+                    drop(state_ref);
+                    let mut state = self.state.borrow_mut();
+                    state.set_hover_info(None);
+                }
+            } else {
+                let mut state = self.state.borrow_mut();
+                state.set_hover_info(None);
+            }
+
+            // Render zoom controls overlay
+            self.render_zoom_controls(ctx, viewport_center);
 
             // Display hover info overlay at bottom
-            let state_ref = self.state.borrow();
-            if let Some((x, y, value)) = state_ref.hover_info() {
-                let (min_val, max_val) = state_ref.value_range();
-                let is_int = state_ref.is_integer();
-
-                // Create overlay at the bottom of the panel
-                egui::Area::new(egui::Id::new("hover_overlay"))
-                    .fixed_pos(egui::pos2(10.0, ui.ctx().screen_rect().max.y - 30.0))
-                    .show(ctx, |ui| {
-                        egui::Frame::popup(ui.style()).show(ui, |ui| {
-                            ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Extend);
-                            if is_int {
-                                ui.label(format!(
-                                    "Pixel ({}, {}): {}  |  Range: [{}, {}]",
-                                    x, y, value as i64, min_val as i64, max_val as i64
-                                ));
-                            } else {
-                                ui.label(format!(
-                                    "Pixel ({}, {}): {:.6}  |  Range: [{:.6}, {:.6}]",
-                                    x, y, value, min_val, max_val
-                                ));
-                            }
-                        });
-                    });
-            }
+            self.render_hover_overlay(ctx, ui);
         });
 
-        // Request continuous repaints while hovering for smooth updates
+        // Request continuous repaints for smooth updates
         ctx.request_repaint();
+    }
+}
+
+impl ViewerApp {
+    /// Handle keyboard shortcuts for zoom
+    fn handle_keyboard_input(&self, ctx: &egui::Context) {
+        let viewport_center = ctx.screen_rect().center();
+
+        ctx.input(|i| {
+            // Zoom in: = or + (numpad)
+            if i.key_pressed(Key::Equals) || i.key_pressed(Key::Plus) {
+                let mut state = self.state.borrow_mut();
+                state.zoom_in(None, viewport_center);
+            }
+            // Zoom out: - (minus)
+            if i.key_pressed(Key::Minus) {
+                let mut state = self.state.borrow_mut();
+                state.zoom_out(None, viewport_center);
+            }
+            // Reset: 0
+            if i.key_pressed(Key::Num0) {
+                let mut state = self.state.borrow_mut();
+                state.zoom_to_fit();
+            }
+        });
+    }
+
+    /// Render zoom control buttons at bottom-right
+    fn render_zoom_controls(&self, ctx: &egui::Context, viewport_center: egui::Pos2) {
+        let screen_rect = ctx.screen_rect();
+        let button_size = egui::vec2(28.0, 28.0);
+        let margin = 10.0;
+        let spacing = 4.0;
+
+        // Position at bottom-right (always reserve space for 3 buttons)
+        let num_buttons = 3.0;
+        let base_x = screen_rect.max.x - margin - button_size.x * num_buttons - spacing * (num_buttons - 1.0);
+        let base_y = screen_rect.max.y - margin - button_size.y;
+
+        egui::Area::new(egui::Id::new("zoom_controls"))
+            .fixed_pos(egui::pos2(base_x, base_y))
+            .show(ctx, |ui| {
+                ui.horizontal(|ui| {
+                    ui.spacing_mut().item_spacing.x = spacing;
+
+                    // Reset button (always in same position, but only visible when not default)
+                    let show_reset = !self.state.borrow().is_default_view();
+                    if show_reset {
+                        if ui.add_sized(button_size, egui::Button::new("⟲")).clicked() {
+                            let mut state = self.state.borrow_mut();
+                            state.zoom_to_fit();
+                        }
+                    } else {
+                        // Invisible placeholder to maintain layout
+                        ui.add_sized(button_size, egui::Label::new(""));
+                    }
+
+                    // Zoom out button
+                    if ui.add_sized(button_size, egui::Button::new("−")).clicked() {
+                        let mut state = self.state.borrow_mut();
+                        state.zoom_out(None, viewport_center);
+                    }
+
+                    // Zoom in button
+                    if ui.add_sized(button_size, egui::Button::new("+")).clicked() {
+                        let mut state = self.state.borrow_mut();
+                        state.zoom_in(None, viewport_center);
+                    }
+                });
+
+                // Show zoom percentage
+                let zoom_level = self.state.borrow().zoom_level();
+                ui.label(format!("{:.0}%", zoom_level * 100.0));
+
+                // Debug: show build timestamp
+                ui.separator();
+                ui.label(format!("Build: {}", env!("BUILD_TIMESTAMP")));
+            });
+    }
+
+    /// Render hover info overlay at bottom-left
+    fn render_hover_overlay(&self, ctx: &egui::Context, ui: &mut egui::Ui) {
+        let state_ref = self.state.borrow();
+        if let Some((x, y, value)) = state_ref.hover_info() {
+            let (min_val, max_val) = state_ref.value_range();
+            let is_int = state_ref.is_integer();
+
+            // Create overlay at the bottom of the panel
+            egui::Area::new(egui::Id::new("hover_overlay"))
+                .fixed_pos(egui::pos2(10.0, ui.ctx().screen_rect().max.y - 30.0))
+                .show(ctx, |ui| {
+                    egui::Frame::popup(ui.style()).show(ui, |ui| {
+                        ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Extend);
+                        if is_int {
+                            ui.label(format!(
+                                "Pixel ({}, {}): {}  |  Range: [{}, {}]",
+                                x, y, value as i64, min_val as i64, max_val as i64
+                            ));
+                        } else {
+                            ui.label(format!(
+                                "Pixel ({}, {}): {:.6}  |  Range: [{:.6}, {:.6}]",
+                                x, y, value, min_val, max_val
+                            ));
+                        }
+                    });
+                });
+        }
     }
 }
