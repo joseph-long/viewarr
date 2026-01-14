@@ -19,6 +19,8 @@ pub struct AppState {
     texture_dirty: bool,
     /// Cached hover information: (image_x, image_y, raw_value)
     hover_info: Option<(u32, u32, f64)>,
+    /// Whether the source data is integer-typed (for display formatting)
+    is_integer: bool,
 }
 
 impl AppState {
@@ -33,11 +35,12 @@ impl AppState {
             container_height: 600,
             texture_dirty: false,
             hover_info: None,
+            is_integer: false,
         }
     }
 
     /// Set new image data, computing min/max for auto-scaling
-    pub fn set_image(&mut self, pixels: Vec<f64>, width: u32, height: u32) {
+    pub fn set_image(&mut self, pixels: Vec<f64>, width: u32, height: u32, is_integer: bool) {
         // Compute min/max, ignoring NaN values
         let mut min_val = f64::INFINITY;
         let mut max_val = f64::NEG_INFINITY;
@@ -70,6 +73,7 @@ impl AppState {
         self.min_val = min_val;
         self.max_val = max_val;
         self.texture_dirty = true;
+        self.is_integer = is_integer;
     }
 
     /// Update container size
@@ -143,6 +147,11 @@ impl AppState {
     /// Get min/max values
     pub fn value_range(&self) -> (f64, f64) {
         (self.min_val, self.max_val)
+    }
+
+    /// Check if source data is integer-typed
+    pub fn is_integer(&self) -> bool {
+        self.is_integer
     }
 }
 
@@ -261,16 +270,25 @@ impl eframe::App for ViewerApp {
             let state_ref = self.state.borrow();
             if let Some((x, y, value)) = state_ref.hover_info() {
                 let (min_val, max_val) = state_ref.value_range();
+                let is_int = state_ref.is_integer();
 
                 // Create overlay at the bottom of the panel
                 egui::Area::new(egui::Id::new("hover_overlay"))
                     .fixed_pos(egui::pos2(10.0, ui.ctx().screen_rect().max.y - 30.0))
                     .show(ctx, |ui| {
                         egui::Frame::popup(ui.style()).show(ui, |ui| {
-                            ui.label(format!(
-                                "Pixel ({}, {}): {:.6}  |  Range: [{:.6}, {:.6}]",
-                                x, y, value, min_val, max_val
-                            ));
+                            ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Extend);
+                            if is_int {
+                                ui.label(format!(
+                                    "Pixel ({}, {}): {}  |  Range: [{}, {}]",
+                                    x, y, value as i64, min_val as i64, max_val as i64
+                                ));
+                            } else {
+                                ui.label(format!(
+                                    "Pixel ({}, {}): {:.6}  |  Range: [{:.6}, {:.6}]",
+                                    x, y, value, min_val, max_val
+                                ));
+                            }
                         });
                     });
             }

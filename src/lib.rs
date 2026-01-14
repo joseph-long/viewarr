@@ -63,26 +63,26 @@ impl ViewerHandle {
     /// * `buffer` - ArrayBuffer containing the raw pixel data
     /// * `width` - Image width in pixels
     /// * `height` - Image height in pixels
-    /// * `dtype` - Data type string matching numpy dtype conventions:
-    ///   - "i1", "b" -> Int8
-    ///   - "u1", "B" -> Uint8
-    ///   - "i2" -> Int16
-    ///   - "u2" -> Uint16
-    ///   - "i4" -> Int32
-    ///   - "u4" -> Uint32
-    ///   - "i8" -> BigInt64
-    ///   - "u8" -> BigUint64
-    ///   - "f4" -> Float32
-    ///   - "f8" -> Float64 (default)
+    /// * `array_type` - JavaScript TypedArray type name:
+    ///   - "Int8Array"
+    ///   - "Uint8Array"
+    ///   - "Int16Array"
+    ///   - "Uint16Array"
+    ///   - "Int32Array"
+    ///   - "Uint32Array"
+    ///   - "BigInt64Array"
+    ///   - "BigUint64Array"
+    ///   - "Float32Array"
+    ///   - "Float64Array" (default)
     #[wasm_bindgen(js_name = setImageData)]
     pub fn set_image_data(
         &self,
         buffer: &js_sys::ArrayBuffer,
         width: u32,
         height: u32,
-        dtype: &str,
+        array_type: &str,
     ) -> Result<(), JsValue> {
-        let pixels = convert_buffer_to_f64(buffer, dtype)?;
+        let pixels = convert_buffer_to_f64(buffer, array_type)?;
 
         let expected_len = (width as usize) * (height as usize);
         if pixels.len() != expected_len {
@@ -95,8 +95,15 @@ impl ViewerHandle {
             )));
         }
 
+        // Determine if the source data is integer-typed (for display formatting)
+        let is_integer = matches!(
+            array_type,
+            "Int8Array" | "Uint8Array" | "Int16Array" | "Uint16Array" |
+            "Int32Array" | "Uint32Array" | "BigInt64Array" | "BigUint64Array"
+        );
+
         let mut state = self.state.borrow_mut();
-        state.set_image(pixels, width, height);
+        state.set_image(pixels, width, height, is_integer);
 
         Ok(())
     }
@@ -110,34 +117,35 @@ impl ViewerHandle {
     }
 }
 
-/// Convert a JavaScript ArrayBuffer to Vec<f64> based on dtype string
-fn convert_buffer_to_f64(buffer: &js_sys::ArrayBuffer, dtype: &str) -> Result<Vec<f64>, JsValue> {
-    match dtype {
-        "i1" | "b" => {
+/// Convert a JavaScript ArrayBuffer to Vec<f64> based on ArrayType string.
+/// ArrayType values correspond to JavaScript TypedArray constructor names.
+fn convert_buffer_to_f64(buffer: &js_sys::ArrayBuffer, array_type: &str) -> Result<Vec<f64>, JsValue> {
+    match array_type {
+        "Int8Array" => {
             let view = js_sys::Int8Array::new(buffer);
             Ok(view.to_vec().into_iter().map(|v| v as f64).collect())
         }
-        "u1" | "B" => {
+        "Uint8Array" => {
             let view = js_sys::Uint8Array::new(buffer);
             Ok(view.to_vec().into_iter().map(|v| v as f64).collect())
         }
-        "i2" => {
+        "Int16Array" => {
             let view = js_sys::Int16Array::new(buffer);
             Ok(view.to_vec().into_iter().map(|v| v as f64).collect())
         }
-        "u2" => {
+        "Uint16Array" => {
             let view = js_sys::Uint16Array::new(buffer);
             Ok(view.to_vec().into_iter().map(|v| v as f64).collect())
         }
-        "i4" => {
+        "Int32Array" => {
             let view = js_sys::Int32Array::new(buffer);
             Ok(view.to_vec().into_iter().map(|v| v as f64).collect())
         }
-        "u4" => {
+        "Uint32Array" => {
             let view = js_sys::Uint32Array::new(buffer);
             Ok(view.to_vec().into_iter().map(|v| v as f64).collect())
         }
-        "i8" => {
+        "BigInt64Array" => {
             let view = js_sys::BigInt64Array::new(buffer);
             let len = view.length() as usize;
             let mut result = Vec::with_capacity(len);
@@ -148,7 +156,7 @@ fn convert_buffer_to_f64(buffer: &js_sys::ArrayBuffer, dtype: &str) -> Result<Ve
             }
             Ok(result)
         }
-        "u8" => {
+        "BigUint64Array" => {
             let view = js_sys::BigUint64Array::new(buffer);
             let len = view.length() as usize;
             let mut result = Vec::with_capacity(len);
@@ -159,11 +167,11 @@ fn convert_buffer_to_f64(buffer: &js_sys::ArrayBuffer, dtype: &str) -> Result<Ve
             }
             Ok(result)
         }
-        "f4" => {
+        "Float32Array" => {
             let view = js_sys::Float32Array::new(buffer);
             Ok(view.to_vec().into_iter().map(|v| v as f64).collect())
         }
-        "f8" | _ => {
+        "Float64Array" | _ => {
             // Default to Float64
             let view = js_sys::Float64Array::new(buffer);
             Ok(view.to_vec())

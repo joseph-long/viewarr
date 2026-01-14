@@ -3,6 +3,21 @@
  */
 
 /**
+ * JavaScript TypedArray type names supported by viewarr.
+ */
+export type ArrayType =
+  | 'Int8Array'
+  | 'Uint8Array'
+  | 'Int16Array'
+  | 'Uint16Array'
+  | 'Int32Array'
+  | 'Uint32Array'
+  | 'BigInt64Array'
+  | 'BigUint64Array'
+  | 'Float32Array'
+  | 'Float64Array';
+
+/**
  * Create a new viewer instance in the specified container.
  *
  * @param containerId - The ID of the HTML element to use as the container.
@@ -19,17 +34,7 @@ export function createViewer(containerId: string): Promise<void>;
  * @param buffer - The raw pixel data.
  * @param width - Image width in pixels.
  * @param height - Image height in pixels.
- * @param dtype - Data type string matching numpy dtype conventions:
- *   - "i1", "b" -> Int8
- *   - "u1", "B" -> Uint8
- *   - "i2" -> Int16
- *   - "u2" -> Uint16
- *   - "i4" -> Int32
- *   - "u4" -> Uint32
- *   - "i8" -> BigInt64
- *   - "u8" -> BigUint64
- *   - "f4" -> Float32
- *   - "f8" -> Float64 (default)
+ * @param arrayType - JavaScript TypedArray type name for interpreting the buffer.
  * @throws If the viewer is not found or data is invalid.
  */
 export function setImageData(
@@ -37,7 +42,7 @@ export function setImageData(
   buffer: ArrayBuffer,
   width: number,
   height: number,
-  dtype: string
+  arrayType: ArrayType
 ): void;
 
 /**
