@@ -1,0 +1,44 @@
+[package]
+name = "viewarr"
+version = "0.1.0"
+edition = "2021"
+authors = ["Your Name <your.email@example.com>"]
+license = "MIT"
+description = "A browser-based array/image viewer using Rust, WASM, and egui"
+repository = "https://github.com/yourusername/viewarr"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[features]
+default = []
+
+[dependencies]
+egui = "0.29"
+eframe = { version = "0.29", default-features = false, features = [
+    "default_fonts",
+    "glow",
+    "wgpu",
+] }
+log = "0.4"
+wasm-bindgen = "0.2"
+wasm-bindgen-futures = "0.4"
+js-sys = "0.3"
+serde = { version = "1.0", features = ["derive"] }
+
+[dependencies.web-sys]
+version = "0.3"
+features = [
+    "console",
+    "Document",
+    "Element",
+    "HtmlCanvasElement",
+    "Window",
+]
+
+[profile.release]
+opt-level = 2
+lto = true
+
+[package.metadata.wasm-pack.profile.release]
+wasm-opt = ["-O2"]
