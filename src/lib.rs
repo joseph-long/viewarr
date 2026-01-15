@@ -2,7 +2,13 @@
 //!
 //! This library provides a WebAssembly-based image viewer that can be embedded
 //! in web applications. It accepts typed array data from JavaScript and renders
-//! it with grayscale colormapping, showing pixel values on hover.
+//! it with colormap support, showing pixel values on hover.
+//!
+//! ## Architecture
+//!
+//! - `ArrayViewerWidget`: Self-contained egui widget with all viewing state
+//! - `ViewerApp`: Thin eframe App shell that hosts the widget
+//! - `ViewerHandle`: WASM interface for JavaScript to control the viewer
 
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -13,13 +19,21 @@ mod app;
 mod colormap;
 mod colormap_luts;
 mod transform;
+mod widget;
 
-use app::AppState;
+use app::ViewerApp;
+use widget::ArrayViewerWidget;
 
 /// A handle to a viewer instance. Each handle manages its own canvas and state.
+///
+/// This struct is exposed to JavaScript and provides methods to control the viewer.
+/// It holds an Rc to the widget so it can call methods on it, and also stores
+/// the eframe runner for the application lifecycle.
 #[wasm_bindgen]
 pub struct ViewerHandle {
-    state: Rc<RefCell<AppState>>,
+    /// The widget instance (shared with ViewerApp)
+    widget: Rc<RefCell<ArrayViewerWidget>>,
+    /// The eframe runner (kept alive to maintain the render loop)
     #[allow(dead_code)]
     runner: eframe::WebRunner,
 }
@@ -43,8 +57,9 @@ impl ViewerHandle {
             eframe::WebLogger::init(log::LevelFilter::Warn).ok();
         }
 
-        let state = Rc::new(RefCell::new(AppState::new()));
-        let state_clone = state.clone();
+        // Create the widget that will be shared between the handle and the app
+        let widget = Rc::new(RefCell::new(ArrayViewerWidget::new()));
+        let widget_for_app = widget.clone();
 
         let web_options = eframe::WebOptions::default();
         let runner = eframe::WebRunner::new();
@@ -53,11 +68,11 @@ impl ViewerHandle {
             .start(
                 canvas,
                 web_options,
-                Box::new(move |cc| Ok(Box::new(app::ViewerApp::new(cc, state_clone.clone())))),
+                Box::new(move |cc| Ok(Box::new(ViewerApp::new(cc, widget_for_app.clone())))),
             )
             .await?;
 
-        Ok(ViewerHandle { state, runner })
+        Ok(ViewerHandle { widget, runner })
     }
 
     /// Set the image data to display.
@@ -105,56 +120,59 @@ impl ViewerHandle {
             "i32" | "u32" | "i64" | "u64"
         );
 
-        let mut state = self.state.borrow_mut();
-        state.set_image(pixels, width, height, is_integer);
+        let mut widget = self.widget.borrow_mut();
+        widget.set_image(pixels, width, height, is_integer);
 
         Ok(())
     }
 
     /// Notify the viewer that the container size has changed.
     /// The viewer will adjust its rendering on the next frame.
+    ///
+    /// Note: Container size is now managed by the app shell which reads
+    /// available space from egui. This method is kept for API compatibility
+    /// but currently has no effect.
     #[wasm_bindgen(js_name = notifyResize)]
-    pub fn notify_resize(&self, width: u32, height: u32) {
-        let mut state = self.state.borrow_mut();
-        state.set_container_size(width, height);
+    pub fn notify_resize(&self, _width: u32, _height: u32) {
+        // Container size is managed by the app shell via egui's available_size()
     }
 
     /// Zoom in by one step (1.25x)
     #[wasm_bindgen(js_name = zoomIn)]
     pub fn zoom_in(&self) {
-        let mut state = self.state.borrow_mut();
+        let mut widget = self.widget.borrow_mut();
         // Use a default viewport center - the actual center will be calculated in the UI
         let center = egui::pos2(400.0, 300.0);
-        state.zoom_in(None, center);
+        widget.zoom_in(None, center);
     }
 
     /// Zoom out by one step (1/1.25x)
     #[wasm_bindgen(js_name = zoomOut)]
     pub fn zoom_out(&self) {
-        let mut state = self.state.borrow_mut();
+        let mut widget = self.widget.borrow_mut();
         let center = egui::pos2(400.0, 300.0);
-        state.zoom_out(None, center);
+        widget.zoom_out(None, center);
     }
 
     /// Reset zoom and pan to fit-to-view
     #[wasm_bindgen(js_name = zoomToFit)]
     pub fn zoom_to_fit(&self) {
-        let mut state = self.state.borrow_mut();
-        state.zoom_to_fit();
+        let mut widget = self.widget.borrow_mut();
+        widget.zoom_to_fit();
     }
 
     /// Set zoom level directly (1.0 = fit to view)
     #[wasm_bindgen(js_name = setZoom)]
     pub fn set_zoom(&self, level: f32) {
-        let mut state = self.state.borrow_mut();
-        let transform = state.transform_mut();
+        let mut widget = self.widget.borrow_mut();
+        let transform = widget.transform_mut();
         transform.zoom = level.clamp(transform::MIN_ZOOM, transform::MAX_ZOOM);
     }
 
     /// Get current zoom level (1.0 = fit to view)
     #[wasm_bindgen(js_name = getZoom)]
     pub fn get_zoom(&self) -> f32 {
-        self.state.borrow().zoom_level()
+        self.widget.borrow().zoom_level()
     }
 }
 
