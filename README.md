@@ -20,6 +20,9 @@ A browser-based array/image viewer built with Rust, WebAssembly, and egui.
 ### Build
 
 ```bash
+# Install deps
+npm install
+
 # Build the WASM module and JS wrapper
 npm run build
 
@@ -34,6 +37,7 @@ The built package will be in `pkg/`.
 ### Installation
 
 For development with a local copy:
+
 ```json
 {
   "dependencies": {
@@ -61,21 +65,6 @@ setImageData('my-container-id', buffer, width, height, dtype);
 destroyViewer('my-container-id');
 ```
 
-### Supported Data Types
-
-| dtype | JavaScript Type | Description |
-|-------|-----------------|-------------|
-| `i1`, `b` | Int8Array | 8-bit signed integer |
-| `u1`, `B` | Uint8Array | 8-bit unsigned integer |
-| `i2` | Int16Array | 16-bit signed integer |
-| `u2` | Uint16Array | 16-bit unsigned integer |
-| `i4` | Int32Array | 32-bit signed integer |
-| `u4` | Uint32Array | 32-bit unsigned integer |
-| `i8` | BigInt64Array | 64-bit signed integer |
-| `u8` | BigUint64Array | 64-bit unsigned integer |
-| `f4` | Float32Array | 32-bit float |
-| `f8` | Float64Array | 64-bit float (default) |
-
 ### Container Requirements
 
 - The container element **must have an ID** - this ID is used to identify the viewer instance
@@ -90,8 +79,8 @@ Each container ID creates an independent viewer with its own state:
 await createViewer('viewer-1');
 await createViewer('viewer-2');
 
-setImageData('viewer-1', buffer1, 100, 100, 'f4');
-setImageData('viewer-2', buffer2, 200, 200, 'f8');
+setImageData('viewer-1', buffer1, 100, 100, 'u16');
+setImageData('viewer-2', buffer2, 200, 200, 'f64');
 ```
 
 ## Integration with JupyterLab

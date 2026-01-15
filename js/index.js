@@ -87,7 +87,7 @@ export async function createViewer(containerId) {
     const handle = await wasmModule.ViewerHandle.create(canvas);
 
     // Set up resize observer
-    const resizeObserver = new ResizeObserver((entries) => {
+    const resizeObserver = new ResizeObserver(entries => {
       for (const entry of entries) {
         const { width, height } = entry.contentRect;
         if (handle && width > 0 && height > 0) {
@@ -102,7 +102,7 @@ export async function createViewer(containerId) {
       handle,
       canvas,
       resizeObserver,
-      container,
+      container
     });
 
     // Trigger initial resize
@@ -238,5 +238,5 @@ export default {
   notifyResize,
   destroyViewer,
   hasViewer,
-  getActiveViewers,
+  getActiveViewers
 };
