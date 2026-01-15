@@ -25,6 +25,8 @@ const COLORBAR_WIDTH: f32 = 32.0;
 const COLORBAR_MAX_HEIGHT: f32 = 300.0;
 /// Color bar margin from edge
 const COLORBAR_MARGIN: f32 = 10.0;
+/// Duration to show zoom level overlay after zooming
+const ZOOM_OVERLAY_DURATION: f64 = 0.5;
 
 /// Actions returned from zoom controls overlay
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -139,6 +141,10 @@ pub struct ArrayViewerWidget {
     colorbar_texture: Option<TextureHandle>,
     /// Track if right mouse button started a drag (for contrast/bias adjustment)
     stretch_drag_active: bool,
+    /// Track when zoom was last changed (for overlay display)
+    zoom_changed_time: Option<f64>,
+    /// Previous zoom level to detect changes
+    prev_zoom_level: f32,
 }
 
 impl Default for ArrayViewerWidget {
@@ -172,6 +178,8 @@ impl ArrayViewerWidget {
             texture: None,
             colorbar_texture: None,
             stretch_drag_active: false,
+            zoom_changed_time: None,
+            prev_zoom_level: 1.0,
         }
     }
 
@@ -729,12 +737,21 @@ impl ArrayViewerWidget {
             self.hover_info = None;
         }
 
+        // Track zoom changes for overlay display
+        let current_zoom = self.zoom_level();
+        let current_time = ctx.input(|i| i.time);
+        if (current_zoom - self.prev_zoom_level).abs() > 0.001 {
+            self.zoom_changed_time = Some(current_time);
+            self.prev_zoom_level = current_zoom;
+        }
+
         // Render overlays using Areas (they render at screen coordinates)
         // We collect actions from overlays and apply them after rendering
         let zoom_action = self.render_zoom_controls(&ctx, viewport_center, rect);
         let stretch_action = self.render_stretch_controls(&ctx, rect);
         self.render_colorbar(&ctx, rect);
         self.render_stretch_info_overlay(&ctx, rect);
+        self.render_zoom_info_overlay(&ctx, rect, current_time);
         self.render_hover_overlay(&ctx, rect);
         self.render_build_info(&ctx, rect);
 
@@ -804,29 +821,40 @@ impl ArrayViewerWidget {
         egui::Area::new(egui::Id::new("zoom_controls"))
             .fixed_pos(egui::pos2(base_x, base_y))
             .show(ctx, |ui| {
-                ui.horizontal(|ui| {
-                    ui.spacing_mut().item_spacing.x = spacing;
+                // Get themed colors
+                let frame_style = overlay_frame(ui);
+                let text_color = get_overlay_text_color(ui);
 
-                    let show_reset = !self.is_default_view();
-                    if show_reset {
-                        if ui.add_sized(button_size, egui::Button::new("⟲")).clicked() {
+                frame_style.show(ui, |ui| {
+                    ui.horizontal(|ui| {
+                        ui.spacing_mut().item_spacing.x = spacing;
+
+                        // Always show reset button, but disable when at default view
+                        let can_reset = !self.is_default_view();
+                        let reset_color = if can_reset { text_color } else { text_color.gamma_multiply(0.3) };
+                        let reset_btn = egui::Button::new(
+                            egui::RichText::new("⟲").color(reset_color)
+                        ).fill(Color32::TRANSPARENT);
+                        let reset_response = ui.add_sized(button_size, reset_btn);
+                        if can_reset && reset_response.clicked() {
                             action = ZoomAction::Reset;
                         }
-                    } else {
-                        ui.add_sized(button_size, egui::Label::new(""));
-                    }
 
-                    if ui.add_sized(button_size, egui::Button::new("−")).clicked() {
-                        action = ZoomAction::ZoomOut;
-                    }
+                        let minus_btn = egui::Button::new(
+                            egui::RichText::new("−").color(text_color)
+                        ).fill(Color32::TRANSPARENT);
+                        if ui.add_sized(button_size, minus_btn).clicked() {
+                            action = ZoomAction::ZoomOut;
+                        }
 
-                    if ui.add_sized(button_size, egui::Button::new("+")).clicked() {
-                        action = ZoomAction::ZoomIn;
-                    }
+                        let plus_btn = egui::Button::new(
+                            egui::RichText::new("+").color(text_color)
+                        ).fill(Color32::TRANSPARENT);
+                        if ui.add_sized(button_size, plus_btn).clicked() {
+                            action = ZoomAction::ZoomIn;
+                        }
+                    });
                 });
-
-                let zoom_level = self.zoom_level();
-                ui.label(format!("{:.0}%", zoom_level * 100.0));
             });
 
         action
@@ -839,9 +867,6 @@ impl ArrayViewerWidget {
 
         let mut action = StretchAction::None;
 
-        let frame_style = egui::Frame::popup(&ctx.style())
-            .fill(egui::Color32::from_black_alpha(180));
-
         egui::Area::new(egui::Id::new("stretch_controls"))
             .anchor(egui::Align2::RIGHT_TOP, egui::vec2(-margin, margin))
             .show(ctx, |ui| {
@@ -851,13 +876,20 @@ impl ArrayViewerWidget {
                 let symmetric = self.is_symmetric();
                 let reversed = self.is_reversed();
 
+                // Get themed colors for overlay
+                let frame_style = overlay_frame(ui);
+                let text_color = get_overlay_text_color(ui);
+
                 ui.horizontal(|ui| {
                     ui.spacing_mut().item_spacing.x = 4.0;
 
-                    // Reset button on far left (only shown when modified)
+                    // Reset button on far left (only shown when modified) - same style as other buttons
                     if is_modified {
                         frame_style.show(ui, |ui| {
-                            if ui.button("⟲").on_hover_text("Reset contrast/bias").clicked() {
+                            let btn = egui::Button::new(
+                                egui::RichText::new("⟲").color(text_color)
+                            ).fill(Color32::TRANSPARENT);
+                            if ui.add(btn).on_hover_text("Reset contrast/bias").clicked() {
                                 action = StretchAction::ResetStretch;
                             }
                         });
@@ -869,14 +901,18 @@ impl ArrayViewerWidget {
                             if symmetric {
                                 // Diverging colormaps for symmetric mode
                                 for &cmap in Colormap::diverging_colormaps() {
-                                    if ui.selectable_label(colormap == cmap, cmap.name()).clicked() {
+                                    let selected = colormap == cmap;
+                                    let label = egui::RichText::new(cmap.name()).color(text_color);
+                                    if ui.selectable_label(selected, label).clicked() {
                                         action = StretchAction::SetColormap(cmap);
                                     }
                                 }
                             } else {
                                 // Standard colormaps for Lin/Log modes
                                 for &cmap in Colormap::standard_colormaps() {
-                                    if ui.selectable_label(colormap == cmap, cmap.name()).clicked() {
+                                    let selected = colormap == cmap;
+                                    let label = egui::RichText::new(cmap.name()).color(text_color);
+                                    if ui.selectable_label(selected, label).clicked() {
                                         action = StretchAction::SetColormap(cmap);
                                     }
                                 }
@@ -885,7 +921,8 @@ impl ArrayViewerWidget {
                             ui.separator();
 
                             // Reverse toggle
-                            if ui.selectable_label(reversed, "Rev").on_hover_text("Reverse colormap").clicked() {
+                            let rev_label = egui::RichText::new("Rev").color(text_color);
+                            if ui.selectable_label(reversed, rev_label).on_hover_text("Reverse colormap").clicked() {
                                 action = StretchAction::ToggleReverse;
                             }
                         });
@@ -894,13 +931,16 @@ impl ArrayViewerWidget {
                     // Stretch modes group
                     frame_style.show(ui, |ui| {
                         ui.horizontal(|ui| {
-                            if ui.selectable_label(stretch_type == StretchType::Linear && !symmetric, "Lin").clicked() {
+                            let lin_label = egui::RichText::new("Lin").color(text_color);
+                            if ui.selectable_label(stretch_type == StretchType::Linear && !symmetric, lin_label).clicked() {
                                 action = StretchAction::SetLinear;
                             }
-                            if ui.selectable_label(stretch_type == StretchType::Log, "Log").clicked() {
+                            let log_label = egui::RichText::new("Log").color(text_color);
+                            if ui.selectable_label(stretch_type == StretchType::Log, log_label).clicked() {
                                 action = StretchAction::SetLog;
                             }
-                            if ui.selectable_label(symmetric, "±").on_hover_text("Symmetric scaling (diverging)").clicked() {
+                            let div_label = egui::RichText::new("±").color(text_color);
+                            if ui.selectable_label(symmetric, div_label).on_hover_text("Symmetric scaling (diverging)").clicked() {
                                 action = StretchAction::SetDiverging;
                             }
                         });
@@ -992,8 +1032,10 @@ impl ArrayViewerWidget {
         egui::Area::new(egui::Id::new("stretch_info_overlay"))
             .fixed_pos(egui::pos2(widget_rect.center().x - 80.0, widget_rect.min.y + 50.0))
             .show(ctx, |ui| {
+                let text_color = get_overlay_text_color(ui);
+                let bg = get_overlay_bg(ui);
                 egui::Frame::popup(ui.style())
-                    .fill(egui::Color32::from_black_alpha(200))
+                    .fill(bg)
                     .show(ui, |ui| {
                         ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Extend);
                         let mode_str = match stretch_type {
@@ -1005,7 +1047,43 @@ impl ArrayViewerWidget {
                                 "{} | Contrast: {:.2} | Bias: {:.2}",
                                 mode_str, cb.contrast, cb.bias
                             ))
-                            .color(egui::Color32::WHITE),
+                            .color(text_color),
+                        );
+                    });
+            });
+    }
+
+    /// Render zoom level overlay while zooming (similar to contrast adjustment overlay)
+    fn render_zoom_info_overlay(&self, ctx: &egui::Context, widget_rect: egui::Rect, current_time: f64) {
+        // Check if we should show the overlay (during and shortly after zoom changes)
+        let should_show = if let Some(changed_time) = self.zoom_changed_time {
+            (current_time - changed_time) < ZOOM_OVERLAY_DURATION
+        } else {
+            false
+        };
+
+        if !should_show {
+            return;
+        }
+
+        let zoom_level = self.zoom_level();
+        let zoom_text = format_zoom_multiple(zoom_level);
+
+        egui::Area::new(egui::Id::new("zoom_info_overlay"))
+            .fixed_pos(egui::pos2(widget_rect.center().x - 50.0, widget_rect.center().y - 20.0))
+            .show(ctx, |ui| {
+                let text_color = get_overlay_text_color(ui);
+                let bg = get_overlay_bg(ui);
+                egui::Frame::popup(ui.style())
+                    .fill(bg)
+                    .rounding(8.0)
+                    .inner_margin(egui::Margin::symmetric(16.0, 8.0))
+                    .show(ui, |ui| {
+                        ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Extend);
+                        ui.label(
+                            egui::RichText::new(zoom_text)
+                                .color(text_color)
+                                .size(24.0),
                         );
                     });
             });
@@ -1071,4 +1149,36 @@ fn format_scientific(v: f64) -> String {
     } else {
         format!("{:.2}", v)
     }
+}
+
+/// Get a translucent background color appropriate for light/dark mode
+fn get_overlay_bg(ui: &Ui) -> Color32 {
+    if ui.visuals().dark_mode {
+        Color32::from_black_alpha(180)
+    } else {
+        Color32::from_white_alpha(220)
+    }
+}
+
+/// Get text color appropriate for light/dark mode overlays
+fn get_overlay_text_color(ui: &Ui) -> Color32 {
+    if ui.visuals().dark_mode {
+        Color32::WHITE
+    } else {
+        Color32::from_gray(30)
+    }
+}
+
+/// Create a frame style for overlay controls that adapts to light/dark mode
+fn overlay_frame(ui: &Ui) -> egui::Frame {
+    let bg = get_overlay_bg(ui);
+    egui::Frame::none()
+        .fill(bg)
+        .rounding(4.0)
+        .inner_margin(egui::Margin::symmetric(6.0, 4.0))
+}
+
+/// Format zoom level as a nice multiple string with consistent decimal places
+fn format_zoom_multiple(zoom: f32) -> String {
+    format!("{:.3}x", zoom)
 }
