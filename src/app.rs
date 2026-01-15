@@ -4,6 +4,53 @@ use egui::{Color32, ColorImage, Key, PointerButton, TextureHandle, TextureOption
 
 use crate::transform::ViewTransform;
 
+/// Default contrast value (DS9 default)
+const DEFAULT_CONTRAST: f64 = 1.0;
+/// Default bias value (DS9 default)
+const DEFAULT_BIAS: f64 = 0.5;
+/// Maximum contrast value (DS9 uses 0-10 range)
+const MAX_CONTRAST: f64 = 10.0;
+/// Minimum contrast value
+const MIN_CONTRAST: f64 = 0.0;
+/// Log stretch exponent (DS9 default for optical images)
+const LOG_EXPONENT: f64 = 1000.0;
+
+/// Stretch function type
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum StretchType {
+    Linear,
+    Log,
+}
+
+impl Default for StretchType {
+    fn default() -> Self {
+        Self::Linear
+    }
+}
+
+/// Contrast and bias settings for a stretch mode
+#[derive(Clone, Copy, Debug)]
+pub struct ContrastBias {
+    pub contrast: f64,
+    pub bias: f64,
+}
+
+impl Default for ContrastBias {
+    fn default() -> Self {
+        Self {
+            contrast: DEFAULT_CONTRAST,
+            bias: DEFAULT_BIAS,
+        }
+    }
+}
+
+impl ContrastBias {
+    pub fn is_default(&self) -> bool {
+        (self.contrast - DEFAULT_CONTRAST).abs() < 0.001
+            && (self.bias - DEFAULT_BIAS).abs() < 0.001
+    }
+}
+
 /// Shared state for a viewer instance
 pub struct AppState {
     /// Raw pixel data as f64 values
@@ -25,6 +72,14 @@ pub struct AppState {
     is_integer: bool,
     /// Pan/zoom transformation state
     transform: ViewTransform,
+    /// Current stretch type (Linear or Log)
+    stretch_type: StretchType,
+    /// Contrast/bias settings for Linear mode
+    linear_cb: ContrastBias,
+    /// Contrast/bias settings for Log mode
+    log_cb: ContrastBias,
+    /// Whether user is currently dragging to adjust contrast/bias
+    is_adjusting_stretch: bool,
 }
 
 impl AppState {
@@ -41,6 +96,10 @@ impl AppState {
             hover_info: None,
             is_integer: false,
             transform: ViewTransform::new(),
+            stretch_type: StretchType::default(),
+            linear_cb: ContrastBias::default(),
+            log_cb: ContrastBias::default(),
+            is_adjusting_stretch: false,
         }
     }
 
@@ -114,19 +173,31 @@ impl AppState {
     }
 
     /// Build a ColorImage from the current pixel data using grayscale mapping
+    /// with stretch function and contrast/bias applied
     pub fn build_color_image(&self) -> Option<ColorImage> {
         let pixels = self.pixels.as_ref()?;
 
         let range = self.max_val - self.min_val;
+        let cb = self.current_contrast_bias();
+        let stretch_type = self.stretch_type;
+
         let rgba: Vec<Color32> = pixels
             .iter()
             .map(|&v| {
+                // Step 1: Normalize to 0-1
                 let normalized = if v.is_finite() {
                     ((v - self.min_val) / range).clamp(0.0, 1.0)
                 } else {
                     0.0 // NaN/Inf -> black
                 };
-                let gray = (normalized * 255.0) as u8;
+
+                // Step 2: Apply stretch function
+                let stretched = apply_stretch(normalized, stretch_type);
+
+                // Step 3: Apply contrast/bias (DS9 formula)
+                let adjusted = apply_contrast_bias(stretched, cb.contrast, cb.bias);
+
+                let gray = (adjusted * 255.0) as u8;
                 Color32::from_gray(gray)
             })
             .collect();
@@ -202,6 +273,101 @@ impl AppState {
     pub fn is_default_view(&self) -> bool {
         self.transform.is_default()
     }
+
+    /// Get current stretch type
+    pub fn stretch_type(&self) -> StretchType {
+        self.stretch_type
+    }
+
+    /// Toggle between Linear and Log stretch
+    pub fn toggle_stretch_type(&mut self) {
+        self.stretch_type = match self.stretch_type {
+            StretchType::Linear => StretchType::Log,
+            StretchType::Log => StretchType::Linear,
+        };
+        self.texture_dirty = true;
+    }
+
+    /// Get current contrast/bias for the active stretch mode
+    pub fn current_contrast_bias(&self) -> ContrastBias {
+        match self.stretch_type {
+            StretchType::Linear => self.linear_cb,
+            StretchType::Log => self.log_cb,
+        }
+    }
+
+    /// Get mutable reference to current contrast/bias
+    fn current_contrast_bias_mut(&mut self) -> &mut ContrastBias {
+        match self.stretch_type {
+            StretchType::Linear => &mut self.linear_cb,
+            StretchType::Log => &mut self.log_cb,
+        }
+    }
+
+    /// Adjust contrast/bias based on mouse drag delta
+    /// dx: horizontal delta (mapped to bias)
+    /// dy: vertical delta (mapped to contrast)
+    /// viewport_size: for normalizing the delta
+    pub fn adjust_contrast_bias(&mut self, dx: f32, dy: f32, viewport_size: Vec2) {
+        let cb = self.current_contrast_bias_mut();
+
+        // Map horizontal to bias (0 to 1)
+        cb.bias = (cb.bias + (dx as f64) / (viewport_size.x as f64)).clamp(0.0, 1.0);
+
+        // Map vertical to contrast (0 to MAX_CONTRAST)
+        // Negate dy because screen Y increases downward but we want drag-up to increase contrast
+        cb.contrast = (cb.contrast - (dy as f64) / (viewport_size.y as f64) * MAX_CONTRAST)
+            .clamp(MIN_CONTRAST, MAX_CONTRAST);
+
+        self.texture_dirty = true;
+    }
+
+    /// Reset contrast/bias for current stretch mode to defaults
+    pub fn reset_current_stretch(&mut self) {
+        *self.current_contrast_bias_mut() = ContrastBias::default();
+        self.texture_dirty = true;
+    }
+
+    /// Reset all stretch settings (both modes) to defaults
+    pub fn reset_all_stretch(&mut self) {
+        self.linear_cb = ContrastBias::default();
+        self.log_cb = ContrastBias::default();
+        self.stretch_type = StretchType::Linear;
+        self.texture_dirty = true;
+    }
+
+    /// Check if current stretch mode has non-default contrast/bias
+    pub fn is_stretch_modified(&self) -> bool {
+        !self.current_contrast_bias().is_default()
+    }
+
+    /// Set whether user is currently adjusting stretch
+    pub fn set_adjusting_stretch(&mut self, adjusting: bool) {
+        self.is_adjusting_stretch = adjusting;
+    }
+
+    /// Check if user is currently adjusting stretch
+    pub fn is_adjusting_stretch(&self) -> bool {
+        self.is_adjusting_stretch
+    }
+}
+
+/// Apply stretch function to a normalized value (0-1)
+fn apply_stretch(x: f64, stretch_type: StretchType) -> f64 {
+    match stretch_type {
+        StretchType::Linear => x,
+        StretchType::Log => {
+            // DS9 log formula: log10(a*x + 1) / log10(a)
+            // This naturally handles x=0: log10(1) = 0
+            (LOG_EXPONENT * x + 1.0).log10() / LOG_EXPONENT.log10()
+        }
+    }
+}
+
+/// Apply DS9-style contrast/bias transformation
+/// Formula: ((x - bias) * contrast + 0.5).clamp(0, 1)
+fn apply_contrast_bias(x: f64, contrast: f64, bias: f64) -> f64 {
+    ((x - bias) * contrast + 0.5).clamp(0.0, 1.0)
 }
 
 impl Default for AppState {
@@ -214,6 +380,8 @@ impl Default for AppState {
 pub struct ViewerApp {
     state: std::rc::Rc<std::cell::RefCell<AppState>>,
     texture: Option<TextureHandle>,
+    /// Track if right mouse button started a drag (for contrast/bias adjustment)
+    stretch_drag_active: bool,
 }
 
 impl ViewerApp {
@@ -224,6 +392,7 @@ impl ViewerApp {
         Self {
             state,
             texture: None,
+            stretch_drag_active: false,
         }
     }
 
@@ -348,6 +517,27 @@ impl eframe::App for ViewerApp {
                 }
             }
 
+            // Handle contrast/bias adjustment via right-click drag (DS9 style)
+            if response.drag_started_by(PointerButton::Secondary) {
+                self.stretch_drag_active = true;
+                let mut state = self.state.borrow_mut();
+                state.set_adjusting_stretch(true);
+            }
+
+            if self.stretch_drag_active && response.dragged_by(PointerButton::Secondary) {
+                let drag_delta = response.drag_delta();
+                if drag_delta != Vec2::ZERO {
+                    let mut state = self.state.borrow_mut();
+                    state.adjust_contrast_bias(drag_delta.x, drag_delta.y, available_size);
+                }
+            }
+
+            if response.drag_stopped_by(PointerButton::Secondary) {
+                self.stretch_drag_active = false;
+                let mut state = self.state.borrow_mut();
+                state.set_adjusting_stretch(false);
+            }
+
             // Handle alt+click to center on point
             let modifiers = ui.input(|i| i.modifiers);
             if response.clicked() && modifiers.alt {
@@ -399,6 +589,12 @@ impl eframe::App for ViewerApp {
 
             // Render zoom controls overlay
             self.render_zoom_controls(ctx, viewport_center);
+
+            // Render stretch controls overlay
+            self.render_stretch_controls(ctx);
+
+            // Render contrast/bias info while adjusting
+            self.render_stretch_info_overlay(ctx);
 
             // Display hover info overlay at bottom
             self.render_hover_overlay(ctx, ui);
@@ -483,6 +679,79 @@ impl ViewerApp {
                 // Debug: show build timestamp
                 ui.separator();
                 ui.label(format!("Build: {}", env!("BUILD_TIMESTAMP")));
+            });
+    }
+
+    /// Render stretch controls (log/linear toggle, reset) at top-right
+    fn render_stretch_controls(&self, ctx: &egui::Context) {
+        let screen_rect = ctx.screen_rect();
+        let margin = 10.0;
+        let spacing = 4.0;
+
+        egui::Area::new(egui::Id::new("stretch_controls"))
+            .fixed_pos(egui::pos2(screen_rect.max.x - margin - 120.0, margin))
+            .show(ctx, |ui| {
+                ui.horizontal(|ui| {
+                    ui.spacing_mut().item_spacing.x = spacing;
+
+                    let state_ref = self.state.borrow();
+                    let stretch_type = state_ref.stretch_type();
+                    let is_modified = state_ref.is_stretch_modified();
+                    drop(state_ref);
+
+                    // Log/Linear toggle button
+                    let toggle_text = match stretch_type {
+                        StretchType::Linear => "Linear",
+                        StretchType::Log => "Log",
+                    };
+                    if ui.button(toggle_text).clicked() {
+                        let mut state = self.state.borrow_mut();
+                        state.toggle_stretch_type();
+                    }
+
+                    // Reset stretch button (only show when modified)
+                    if is_modified {
+                        if ui.button("⟲").on_hover_text("Reset contrast/bias").clicked() {
+                            let mut state = self.state.borrow_mut();
+                            state.reset_current_stretch();
+                        }
+                    }
+                });
+            });
+    }
+
+    /// Render contrast/bias values while adjusting (DS9-style feedback)
+    fn render_stretch_info_overlay(&self, ctx: &egui::Context) {
+        let state_ref = self.state.borrow();
+        if !state_ref.is_adjusting_stretch() {
+            return;
+        }
+
+        let cb = state_ref.current_contrast_bias();
+        let stretch_type = state_ref.stretch_type();
+        drop(state_ref);
+
+        let screen_rect = ctx.screen_rect();
+
+        egui::Area::new(egui::Id::new("stretch_info_overlay"))
+            .fixed_pos(egui::pos2(screen_rect.center().x - 80.0, 50.0))
+            .show(ctx, |ui| {
+                egui::Frame::popup(ui.style())
+                    .fill(egui::Color32::from_black_alpha(200))
+                    .show(ui, |ui| {
+                        ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Extend);
+                        let mode_str = match stretch_type {
+                            StretchType::Linear => "Linear",
+                            StretchType::Log => "Log",
+                        };
+                        ui.label(
+                            egui::RichText::new(format!(
+                                "{} | Contrast: {:.2} | Bias: {:.2}",
+                                mode_str, cb.contrast, cb.bias
+                            ))
+                            .color(egui::Color32::WHITE),
+                        );
+                    });
             });
     }
 
