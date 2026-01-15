@@ -10,6 +10,8 @@ use wasm_bindgen::prelude::*;
 use web_sys::HtmlCanvasElement;
 
 mod app;
+mod colormap;
+mod colormap_luts;
 mod transform;
 
 use app::AppState;

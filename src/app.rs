@@ -2,6 +2,7 @@
 
 use egui::{Color32, ColorImage, Key, PointerButton, TextureHandle, TextureOptions, Vec2};
 
+use crate::colormap::Colormap;
 use crate::transform::ViewTransform;
 
 /// Default contrast value (DS9 default)
@@ -14,6 +15,12 @@ const MAX_CONTRAST: f64 = 10.0;
 const MIN_CONTRAST: f64 = 0.0;
 /// Log stretch exponent (DS9 default for optical images)
 const LOG_EXPONENT: f64 = 1000.0;
+/// Color bar width in pixels
+const COLORBAR_WIDTH: f32 = 32.0;
+/// Maximum color bar height in pixels
+const COLORBAR_MAX_HEIGHT: f32 = 300.0;
+/// Color bar margin from edge
+const COLORBAR_MARGIN: f32 = 10.0;
 
 /// Stretch function type
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -80,6 +87,10 @@ pub struct AppState {
     log_cb: ContrastBias,
     /// Whether user is currently dragging to adjust contrast/bias
     is_adjusting_stretch: bool,
+    /// Current colormap
+    colormap: Colormap,
+    /// Symmetric mode (scale around zero)
+    symmetric_mode: bool,
 }
 
 impl AppState {
@@ -100,6 +111,8 @@ impl AppState {
             linear_cb: ContrastBias::default(),
             log_cb: ContrastBias::default(),
             is_adjusting_stretch: false,
+            colormap: Colormap::default(),
+            symmetric_mode: false,
         }
     }
 
@@ -172,33 +185,21 @@ impl AppState {
         dirty
     }
 
-    /// Build a ColorImage from the current pixel data using grayscale mapping
+    /// Build a ColorImage from the current pixel data using colormap
     /// with stretch function and contrast/bias applied
     pub fn build_color_image(&self) -> Option<ColorImage> {
         let pixels = self.pixels.as_ref()?;
 
-        let range = self.max_val - self.min_val;
+        let (scale_min, scale_max) = self.scaling_range();
         let cb = self.current_contrast_bias();
         let stretch_type = self.stretch_type;
+        let colormap = self.colormap;
 
         let rgba: Vec<Color32> = pixels
             .iter()
             .map(|&v| {
-                // Step 1: Normalize to 0-1
-                let normalized = if v.is_finite() {
-                    ((v - self.min_val) / range).clamp(0.0, 1.0)
-                } else {
-                    0.0 // NaN/Inf -> black
-                };
-
-                // Step 2: Apply stretch function
-                let stretched = apply_stretch(normalized, stretch_type);
-
-                // Step 3: Apply contrast/bias (DS9 formula)
-                let adjusted = apply_contrast_bias(stretched, cb.contrast, cb.bias);
-
-                let gray = (adjusted * 255.0) as u8;
-                Color32::from_gray(gray)
+                let adjusted = self.apply_full_stretch(v, scale_min, scale_max, cb, stretch_type);
+                colormap.map(adjusted)
             })
             .collect();
 
@@ -206,6 +207,48 @@ impl AppState {
             size: [self.width as usize, self.height as usize],
             pixels: rgba,
         })
+    }
+
+    /// Get the scaling range based on symmetric mode
+    pub fn scaling_range(&self) -> (f64, f64) {
+        if self.symmetric_mode {
+            let abs_max = self.min_val.abs().max(self.max_val.abs());
+            (-abs_max, abs_max)
+        } else {
+            (self.min_val, self.max_val)
+        }
+    }
+
+    /// Apply full stretch pipeline to a single value
+    /// Returns a value in 0-1 range suitable for colormap lookup
+    fn apply_full_stretch(
+        &self,
+        v: f64,
+        scale_min: f64,
+        scale_max: f64,
+        cb: ContrastBias,
+        stretch_type: StretchType,
+    ) -> f64 {
+        // Step 1: Normalize to 0-1
+        let range = scale_max - scale_min;
+        let normalized = if v.is_finite() && range.abs() > f64::EPSILON {
+            ((v - scale_min) / range).clamp(0.0, 1.0)
+        } else {
+            0.0 // NaN/Inf -> black
+        };
+
+        // Step 2: Apply stretch function
+        let stretched = apply_stretch(normalized, stretch_type);
+
+        // Step 3: Apply contrast/bias (DS9 formula)
+        apply_contrast_bias(stretched, cb.contrast, cb.bias)
+    }
+
+    /// Apply stretch to a normalized value for colorbar generation
+    pub fn apply_colorbar_stretch(&self, t: f64) -> f64 {
+        let cb = self.current_contrast_bias();
+        let stretched = apply_stretch(t, self.stretch_type);
+        apply_contrast_bias(stretched, cb.contrast, cb.bias)
     }
 
     /// Get raw pixel value at image coordinates
@@ -350,6 +393,52 @@ impl AppState {
     pub fn is_adjusting_stretch(&self) -> bool {
         self.is_adjusting_stretch
     }
+
+    /// Get current colormap
+    pub fn colormap(&self) -> Colormap {
+        self.colormap
+    }
+
+    /// Set colormap
+    pub fn set_colormap(&mut self, colormap: Colormap) {
+        // If selecting a diverging colormap, enable symmetric mode
+        if colormap.is_diverging() && !self.symmetric_mode {
+            self.symmetric_mode = true;
+        }
+        self.colormap = colormap;
+        self.texture_dirty = true;
+    }
+
+    /// Check if symmetric mode is enabled
+    pub fn is_symmetric(&self) -> bool {
+        self.symmetric_mode
+    }
+
+    /// Toggle symmetric mode
+    pub fn toggle_symmetric(&mut self) {
+        self.symmetric_mode = !self.symmetric_mode;
+        // If disabling symmetric mode and using a diverging colormap, switch to grayscale
+        if !self.symmetric_mode && self.colormap.is_diverging() {
+            self.colormap = Colormap::Grayscale;
+        }
+        self.texture_dirty = true;
+    }
+
+    /// Set stretch type directly (used by selectable labels)
+    pub fn set_stretch_type(&mut self, stretch_type: StretchType) {
+        if self.stretch_type != stretch_type {
+            self.stretch_type = stretch_type;
+            // If switching to log, disable symmetric mode (log doesn't work well with negative values)
+            if stretch_type == StretchType::Log && self.symmetric_mode {
+                self.symmetric_mode = false;
+                // Also switch away from diverging colormaps
+                if self.colormap.is_diverging() {
+                    self.colormap = Colormap::Grayscale;
+                }
+            }
+            self.texture_dirty = true;
+        }
+    }
 }
 
 /// Apply stretch function to a normalized value (0-1)
@@ -380,6 +469,8 @@ impl Default for AppState {
 pub struct ViewerApp {
     state: std::rc::Rc<std::cell::RefCell<AppState>>,
     texture: Option<TextureHandle>,
+    /// Colorbar texture (regenerated when stretch changes)
+    colorbar_texture: Option<TextureHandle>,
     /// Track if right mouse button started a drag (for contrast/bias adjustment)
     stretch_drag_active: bool,
 }
@@ -392,6 +483,7 @@ impl ViewerApp {
         Self {
             state,
             texture: None,
+            colorbar_texture: None,
             stretch_drag_active: false,
         }
     }
@@ -406,6 +498,46 @@ impl ViewerApp {
                 TextureOptions::NEAREST, // Use nearest-neighbor for pixel art look
             ));
         }
+        // Also rebuild colorbar
+        let colormap = state.colormap();
+        let cb = state.current_contrast_bias();
+        let stretch_type = state.stretch_type();
+        drop(state);
+
+        self.rebuild_colorbar_texture(ctx, colormap, cb, stretch_type);
+    }
+
+    /// Rebuild the colorbar texture
+    fn rebuild_colorbar_texture(
+        &mut self,
+        ctx: &egui::Context,
+        colormap: Colormap,
+        cb: ContrastBias,
+        stretch_type: StretchType,
+    ) {
+        let height = 256;
+        let width = 1;
+
+        let pixels: Vec<Color32> = (0..height)
+            .rev() // Reverse so high values are at top
+            .map(|y| {
+                let t = y as f64 / (height - 1) as f64;
+                let stretched = apply_stretch(t, stretch_type);
+                let adjusted = apply_contrast_bias(stretched, cb.contrast, cb.bias);
+                colormap.map(adjusted)
+            })
+            .collect();
+
+        let color_image = ColorImage {
+            size: [width, height],
+            pixels,
+        };
+
+        self.colorbar_texture = Some(ctx.load_texture(
+            "colorbar",
+            color_image,
+            TextureOptions::LINEAR,
+        ));
     }
 }
 
@@ -593,6 +725,9 @@ impl eframe::App for ViewerApp {
             // Render stretch controls overlay
             self.render_stretch_controls(ctx);
 
+            // Render colorbar overlay
+            self.render_colorbar(ctx);
+
             // Render contrast/bias info while adjusting
             self.render_stretch_info_overlay(ctx);
 
@@ -682,40 +817,138 @@ impl ViewerApp {
             });
     }
 
-    /// Render stretch controls (log/linear toggle, reset) at top-right
+    /// Render stretch controls (log/linear toggle, colormap, symmetric, reset) at top-right
     fn render_stretch_controls(&self, ctx: &egui::Context) {
         let screen_rect = ctx.screen_rect();
         let margin = 10.0;
-        let spacing = 4.0;
 
         egui::Area::new(egui::Id::new("stretch_controls"))
-            .fixed_pos(egui::pos2(screen_rect.max.x - margin - 120.0, margin))
+            .fixed_pos(egui::pos2(screen_rect.max.x - margin - 200.0, margin))
             .show(ctx, |ui| {
-                ui.horizontal(|ui| {
-                    ui.spacing_mut().item_spacing.x = spacing;
+                egui::Frame::popup(ui.style())
+                    .fill(egui::Color32::from_black_alpha(180))
+                    .show(ui, |ui| {
+                        ui.horizontal(|ui| {
+                            let state_ref = self.state.borrow();
+                            let stretch_type = state_ref.stretch_type();
+                            let is_modified = state_ref.is_stretch_modified();
+                            let colormap = state_ref.colormap();
+                            let symmetric = state_ref.is_symmetric();
+                            drop(state_ref);
 
-                    let state_ref = self.state.borrow();
-                    let stretch_type = state_ref.stretch_type();
-                    let is_modified = state_ref.is_stretch_modified();
-                    drop(state_ref);
+                            // Stretch type toggle using SelectableLabel
+                            if ui.selectable_label(stretch_type == StretchType::Linear, "Lin").clicked() {
+                                let mut state = self.state.borrow_mut();
+                                state.set_stretch_type(StretchType::Linear);
+                            }
+                            if ui.selectable_label(stretch_type == StretchType::Log, "Log").clicked() {
+                                let mut state = self.state.borrow_mut();
+                                state.set_stretch_type(StretchType::Log);
+                            }
 
-                    // Log/Linear toggle button
-                    let toggle_text = match stretch_type {
-                        StretchType::Linear => "Linear",
-                        StretchType::Log => "Log",
+                            ui.separator();
+
+                            // Colormap selection
+                            for &cmap in Colormap::standard_colormaps() {
+                                if ui.selectable_label(colormap == cmap, cmap.name()).clicked() {
+                                    let mut state = self.state.borrow_mut();
+                                    state.set_colormap(cmap);
+                                }
+                            }
+
+                            // Only show symmetric mode toggle for linear stretch
+                            if stretch_type == StretchType::Linear {
+                                ui.separator();
+
+                                // Symmetric mode toggle
+                                if ui.selectable_label(symmetric, "±").on_hover_text("Symmetric scaling").clicked() {
+                                    let mut state = self.state.borrow_mut();
+                                    state.toggle_symmetric();
+                                }
+
+                                // Diverging colormaps only available in symmetric mode
+                                if symmetric {
+                                    for &cmap in Colormap::diverging_colormaps() {
+                                        if ui.selectable_label(colormap == cmap, cmap.name()).clicked() {
+                                            let mut state = self.state.borrow_mut();
+                                            state.set_colormap(cmap);
+                                        }
+                                    }
+                                }
+                            }
+
+                            // Reset stretch button (only show when modified)
+                            if is_modified {
+                                ui.separator();
+                                if ui.button("⟲").on_hover_text("Reset contrast/bias").clicked() {
+                                    let mut state = self.state.borrow_mut();
+                                    state.reset_current_stretch();
+                                }
+                            }
+                        });
+                    });
+            });
+    }
+
+    /// Render colorbar overlay at top-left
+    fn render_colorbar(&self, ctx: &egui::Context) {
+        let state_ref = self.state.borrow();
+        if !state_ref.has_image() {
+            return;
+        }
+
+        let screen_rect = ctx.screen_rect();
+        let (scale_min, scale_max) = state_ref.scaling_range();
+        let is_int = state_ref.is_integer();
+        drop(state_ref);
+
+        // Calculate colorbar height: min(300, 0.5 * viewport_height)
+        let bar_height = COLORBAR_MAX_HEIGHT.min(screen_rect.height() * 0.5);
+        let bar_width = COLORBAR_WIDTH;
+
+        egui::Area::new(egui::Id::new("colorbar"))
+            .fixed_pos(egui::pos2(COLORBAR_MARGIN, COLORBAR_MARGIN))
+            .show(ctx, |ui| {
+                ui.vertical(|ui| {
+                    // Max value label at top
+                    let max_label = if is_int {
+                        format!("{}", scale_max as i64)
+                    } else {
+                        format_scientific(scale_max)
                     };
-                    if ui.button(toggle_text).clicked() {
-                        let mut state = self.state.borrow_mut();
-                        state.toggle_stretch_type();
+                    ui.label(egui::RichText::new(&max_label).color(Color32::WHITE).small());
+
+                    // Draw colorbar
+                    if let Some(texture) = &self.colorbar_texture {
+                        let bar_rect = egui::Rect::from_min_size(
+                            ui.cursor().min,
+                            egui::vec2(bar_width, bar_height),
+                        );
+                        ui.allocate_space(egui::vec2(bar_width, bar_height));
+
+                        let painter = ui.painter();
+                        // Draw border
+                        painter.rect_stroke(
+                            bar_rect.expand(1.0),
+                            0.0,
+                            egui::Stroke::new(1.0, Color32::GRAY),
+                        );
+                        // Draw colorbar texture
+                        painter.image(
+                            texture.id(),
+                            bar_rect,
+                            egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
+                            Color32::WHITE,
+                        );
                     }
 
-                    // Reset stretch button (only show when modified)
-                    if is_modified {
-                        if ui.button("⟲").on_hover_text("Reset contrast/bias").clicked() {
-                            let mut state = self.state.borrow_mut();
-                            state.reset_current_stretch();
-                        }
-                    }
+                    // Min value label at bottom
+                    let min_label = if is_int {
+                        format!("{}", scale_min as i64)
+                    } else {
+                        format_scientific(scale_min)
+                    };
+                    ui.label(egui::RichText::new(&min_label).color(Color32::WHITE).small());
                 });
             });
     }
@@ -759,7 +992,6 @@ impl ViewerApp {
     fn render_hover_overlay(&self, ctx: &egui::Context, ui: &mut egui::Ui) {
         let state_ref = self.state.borrow();
         if let Some((x, y, value)) = state_ref.hover_info() {
-            let (min_val, max_val) = state_ref.value_range();
             let is_int = state_ref.is_integer();
 
             // Create overlay at the bottom of the panel
@@ -769,18 +1001,23 @@ impl ViewerApp {
                     egui::Frame::popup(ui.style()).show(ui, |ui| {
                         ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Extend);
                         if is_int {
-                            ui.label(format!(
-                                "Pixel ({}, {}): {}  |  Range: [{}, {}]",
-                                x, y, value as i64, min_val as i64, max_val as i64
-                            ));
+                            ui.label(format!("Pixel ({}, {}): {}", x, y, value as i64));
                         } else {
-                            ui.label(format!(
-                                "Pixel ({}, {}): {:.6}  |  Range: [{:.6}, {:.6}]",
-                                x, y, value, min_val, max_val
-                            ));
+                            ui.label(format!("Pixel ({}, {}): {:.6}", x, y, value));
                         }
                     });
                 });
         }
+    }
+}
+
+/// Format a float in scientific notation for compact display
+fn format_scientific(v: f64) -> String {
+    if v == 0.0 {
+        "0".to_string()
+    } else if v.abs() >= 1e4 || v.abs() < 1e-2 {
+        format!("{:.2e}", v)
+    } else {
+        format!("{:.2}", v)
     }
 }
