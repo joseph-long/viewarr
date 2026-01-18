@@ -10,6 +10,9 @@ use std::cell::RefCell;
 use std::rc::Rc;
 
 use crate::widget::ArrayViewerWidget;
+use wasm_bindgen::JsValue;
+use web_sys::console;
+use egui::emath;
 
 /// The eframe application shell for the viewer.
 ///
@@ -19,6 +22,7 @@ use crate::widget::ArrayViewerWidget;
 pub struct ViewerApp {
     /// The widget instance (shared with ViewerHandle for external control)
     widget: Rc<RefCell<ArrayViewerWidget>>,
+    last_logged : f64
 }
 
 impl ViewerApp {
@@ -30,17 +34,23 @@ impl ViewerApp {
         _cc: &eframe::CreationContext<'_>,
         widget: Rc<RefCell<ArrayViewerWidget>>,
     ) -> Self {
-        Self { widget }
+        Self { widget, last_logged: 0.0 }
     }
 }
 
 impl eframe::App for ViewerApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        let current_time = ctx.input(|i| i.time);
         // Use a CentralPanel with no margin/padding
         let frame = egui::Frame::central_panel(&ctx.style()).inner_margin(0.0);
         egui::CentralPanel::default().frame(frame).show(ctx, |ui| {
             // Use the actual available size from egui's layout system
-            let container_size = ui.available_size();
+            // let container_size = ui.available_size();
+            let container_size = emath::vec2(100.0, 100.0);
+            if ((current_time - self.last_logged) > 10.0) {
+                console::log_1(&JsValue::from_str(&format!("container_size = {}", container_size)));
+                self.last_logged = current_time;
+            }
             
             // Render the widget
             let mut widget = self.widget.borrow_mut();

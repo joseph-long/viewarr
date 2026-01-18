@@ -12,7 +12,10 @@ crate-type = ["cdylib", "rlib"]
 
 [features]
 default = []
-
+# [patch.crates-io]
+# egui = { path = "../../egui-0.29.1/crates/egui" }
+# eframe = { path = "../../egui-0.29.1/crates/eframe" }
+# egui_glow = { path = "../../egui-0.29.1/crates/egui_glow" }
 [dependencies]
 egui = "0.29"
 eframe = { version = "0.29", default-features = false, features = [
