@@ -29,6 +29,7 @@ use widget::ArrayViewerWidget;
 /// This struct is exposed to JavaScript and provides methods to control the viewer.
 /// It holds an Rc to the widget so it can call methods on it, and also stores
 /// the eframe runner for the application lifecycle.
+#[cfg(target_arch = "wasm32")]
 #[wasm_bindgen]
 pub struct ViewerHandle {
     /// The widget instance (shared with ViewerApp)
@@ -178,6 +179,7 @@ impl ViewerHandle {
 
 /// Convert a JavaScript ArrayBuffer to Vec<f64> based on ArrayType string.
 /// ArrayType values are Rust-style type specifiers (i8, u8, i16, etc.).
+#[cfg(target_arch = "wasm32")]
 fn convert_buffer_to_f64(buffer: &js_sys::ArrayBuffer, array_type: &str) -> Result<Vec<f64>, JsValue> {
     match array_type {
         "i8" => {

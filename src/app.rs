@@ -45,9 +45,8 @@ impl eframe::App for ViewerApp {
         let frame = egui::Frame::central_panel(&ctx.style()).inner_margin(0.0);
         egui::CentralPanel::default().frame(frame).show(ctx, |ui| {
             // Use the actual available size from egui's layout system
-            // let container_size = ui.available_size();
-            let container_size = emath::vec2(100.0, 100.0);
-            if ((current_time - self.last_logged) > 10.0) {
+            let container_size = ui.available_size();
+            if (current_time - self.last_logged) > 10.0 {
                 console::log_1(&JsValue::from_str(&format!("container_size = {}", container_size)));
                 self.last_logged = current_time;
             }

@@ -528,6 +528,7 @@ impl ArrayViewerWidget {
         Some(ColorImage {
             size: [self.width as usize, self.height as usize],
             pixels: rgba,
+            source_size: egui::Vec2::new(self.width as f32, self.height as f32),
         })
     }
 
@@ -570,6 +571,7 @@ impl ArrayViewerWidget {
         let color_image = ColorImage {
             size: [width, height],
             pixels,
+            source_size: egui::Vec2::new(width as f32, height as f32),
         };
 
         self.colorbar_texture = Some(ctx.load_texture(
@@ -787,7 +789,7 @@ impl ArrayViewerWidget {
 
     /// Handle keyboard shortcuts for zoom
     fn handle_keyboard_input(&mut self, ctx: &egui::Context) {
-        let viewport_center = ctx.screen_rect().center();
+        let viewport_center = ctx.viewport(|vp| vp.this_pass.available_rect.center());
 
         ctx.input(|i| {
             // Zoom in: = or + (numpad)
@@ -975,10 +977,10 @@ impl ArrayViewerWidget {
                     } else {
                         format_scientific(scale_max)
                     };
-                    egui::Frame::none()
+                    egui::Frame::NONE
                         .fill(label_bg)
-                        .rounding(2.0)
-                        .inner_margin(egui::Margin::symmetric(4.0, 1.0))
+                        .corner_radius(2.0)
+                        .inner_margin(egui::Margin::symmetric(4, 1))
                         .show(ui, |ui| {
                             ui.label(egui::RichText::new(&max_label).color(Color32::WHITE).small());
                         });
@@ -995,6 +997,7 @@ impl ArrayViewerWidget {
                             bar_rect.expand(1.0),
                             0.0,
                             egui::Stroke::new(1.0, Color32::GRAY),
+                            egui::StrokeKind::Outside,
                         );
                         painter.image(
                             texture.id(),
@@ -1009,10 +1012,10 @@ impl ArrayViewerWidget {
                     } else {
                         format_scientific(scale_min)
                     };
-                    egui::Frame::none()
+                    egui::Frame::NONE
                         .fill(label_bg)
-                        .rounding(2.0)
-                        .inner_margin(egui::Margin::symmetric(4.0, 1.0))
+                        .corner_radius(2.0)
+                        .inner_margin(egui::Margin::symmetric(4, 1))
                         .show(ui, |ui| {
                             ui.label(egui::RichText::new(&min_label).color(Color32::WHITE).small());
                         });
@@ -1076,8 +1079,8 @@ impl ArrayViewerWidget {
                 let bg = get_overlay_bg(ui);
                 egui::Frame::popup(ui.style())
                     .fill(bg)
-                    .rounding(8.0)
-                    .inner_margin(egui::Margin::symmetric(16.0, 8.0))
+                    .corner_radius(8.0)
+                    .inner_margin(egui::Margin::symmetric(16, 8))
                     .show(ui, |ui| {
                         ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Extend);
                         ui.label(
@@ -1172,10 +1175,10 @@ fn get_overlay_text_color(ui: &Ui) -> Color32 {
 /// Create a frame style for overlay controls that adapts to light/dark mode
 fn overlay_frame(ui: &Ui) -> egui::Frame {
     let bg = get_overlay_bg(ui);
-    egui::Frame::none()
+    egui::Frame::NONE
         .fill(bg)
-        .rounding(4.0)
-        .inner_margin(egui::Margin::symmetric(6.0, 4.0))
+        .corner_radius(4.0)
+        .inner_margin(egui::Margin::symmetric(6, 4))
 }
 
 /// Format zoom level as a nice multiple string with consistent decimal places
