@@ -39,6 +39,13 @@ pub struct ViewerHandle {
     runner: eframe::WebRunner,
 }
 
+#[wasm_bindgen(start)]
+fn init_logging() {
+    // Initialize the logger
+    console_log::init_with_level(log::Level::Debug).expect("error initializing logger");
+}
+
+
 #[wasm_bindgen]
 impl ViewerHandle {
     /// Create a new viewer instance attached to the given canvas element.
@@ -127,15 +134,10 @@ impl ViewerHandle {
         Ok(())
     }
 
-    /// Notify the viewer that the container size has changed.
-    /// The viewer will adjust its rendering on the next frame.
-    ///
-    /// Note: Container size is now managed by the app shell which reads
-    /// available space from egui. This method is kept for API compatibility
-    /// but currently has no effect.
-    #[wasm_bindgen(js_name = notifyResize)]
-    pub fn notify_resize(&self, _width: u32, _height: u32) {
-        // Container size is managed by the app shell via egui's available_size()
+    /// End event loop and release resources
+    #[wasm_bindgen(js_name = destroy)]
+    pub fn destroy(&self) {
+        self.runner.destroy();
     }
 
     /// Zoom in by one step (1.25x)

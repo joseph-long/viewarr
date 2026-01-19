@@ -86,17 +86,6 @@ export async function createViewer(containerId) {
     // Create the viewer handle using static factory method
     const handle = await wasmModule.ViewerHandle.create(canvas);
 
-    // Set up resize observer
-    const resizeObserver = new ResizeObserver(entries => {
-      for (const entry of entries) {
-        const { width, height } = entry.contentRect;
-        if (handle && width > 0 && height > 0) {
-          handle.notifyResize(Math.floor(width), Math.floor(height));
-        }
-      }
-    });
-    resizeObserver.observe(container);
-
     // Store viewer state
     viewers.set(containerId, {
       handle,
@@ -105,11 +94,26 @@ export async function createViewer(containerId) {
       container
     });
 
-    // Trigger initial resize
-    const rect = container.getBoundingClientRect();
-    if (rect.width > 0 && rect.height > 0) {
-      handle.notifyResize(Math.floor(rect.width), Math.floor(rect.height));
-    }
+    // Set up MutationObserver to detect container removal (e.g., tab close)
+    const mutationObserver = new MutationObserver((mutations) => {
+      mutations.forEach((mutation) => {
+        mutation.removedNodes.forEach((node) => {
+          console.debug("removed node", node);
+          if (node === container || node.contains(container)) {
+            console.debug("contains viewer, destroying");
+            destroyViewer(containerId);
+            console.debug("canceling observer");
+            mutationObserver.disconnect();
+          }
+        });
+      });
+    });
+    mutationObserver.observe(document.body, { childList: true, subtree: true });
+    console.log("Installed mutation observer");
+
+    // Update viewer state to include the observer
+    viewers.get(containerId).mutationObserver = mutationObserver;
+
   } catch (error) {
     // Show error in container
     container.innerHTML = '';
@@ -174,24 +178,6 @@ export function setImageData(containerId, buffer, width, height, dtype) {
 }
 
 /**
- * Notify a viewer that its container has been resized.
- * This is typically called automatically by ResizeObserver,
- * but can be called manually if needed.
- *
- * @param {string} containerId - The ID of the container (viewer instance).
- * @param {number} width - New width in pixels.
- * @param {number} height - New height in pixels.
- */
-export function notifyResize(containerId, width, height) {
-  const viewer = viewers.get(containerId);
-  if (!viewer) {
-    throw new Error(`No viewer found for container "${containerId}"`);
-  }
-
-  viewer.handle.notifyResize(width, height);
-}
-
-/**
  * Destroy a viewer instance and clean up resources.
  *
  * @param {string} containerId - The ID of the container (viewer instance).
@@ -201,9 +187,15 @@ export function destroyViewer(containerId) {
   if (!viewer) {
     return; // Already destroyed or never created
   }
+  viewer.handle.destroy();
 
   // Stop observing resize
   viewer.resizeObserver.disconnect();
+
+  // Stop observing mutations
+  if (viewer.mutationObserver) {
+    viewer.mutationObserver.disconnect();
+  }
 
   // Clear the container
   viewer.container.innerHTML = '';
@@ -230,6 +222,15 @@ export function hasViewer(containerId) {
 export function getActiveViewers() {
   return Array.from(viewers.keys());
 }
+
+window.viewarr = {
+  createViewer,
+  setImageData,
+  notifyResize,
+  destroyViewer,
+  hasViewer,
+  getActiveViewers
+};
 
 // Default export for convenience
 export default {

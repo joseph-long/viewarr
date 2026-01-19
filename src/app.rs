@@ -14,6 +14,8 @@ use wasm_bindgen::JsValue;
 use web_sys::console;
 use egui::emath;
 
+use eframe::WebLogger;
+
 /// The eframe application shell for the viewer.
 ///
 /// This is a thin wrapper that hosts a single ArrayViewerWidget and
@@ -34,6 +36,8 @@ impl ViewerApp {
         _cc: &eframe::CreationContext<'_>,
         widget: Rc<RefCell<ArrayViewerWidget>>,
     ) -> Self {
+        // Initialize logging (adjust level as needed: Error, Warn, Info, Debug, Trace)
+        WebLogger::init(log::LevelFilter::Trace).ok();
         Self { widget, last_logged: 0.0 }
     }
 }
