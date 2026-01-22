@@ -1,10 +1,11 @@
 # viewarr
 
-A browser-based array/image viewer built with Rust, WebAssembly, and egui.
+An array/image viewer built with Rust, WebAssembly, and egui.
 
 ## Features
 
-- Renders numeric arrays as grayscale images with auto-scaling
+- Re-stretches images with linear, log, or symmetric linear scales
+- Adjusts contrast and bias interactively by right-clicking and dragging
 - Shows original pixel values on hover
 - Supports multiple independent viewer instances per page
 - Accepts all JavaScript TypedArray types (Int8, Uint8, Int16, Uint16, Int32, Uint32, BigInt64, BigUint64, Float32, Float64)
@@ -14,7 +15,7 @@ A browser-based array/image viewer built with Rust, WebAssembly, and egui.
 
 ### Prerequisites
 
-- [Rust](https://rustup.rs/) with wasm32-unknown-unknown target
+- [Rust](https://rustup.rs/) with `wasm32-unknown-unknown` target
 - [wasm-pack](https://rustwasm.github.io/wasm-pack/installer/)
 
 ### Build
@@ -85,7 +86,7 @@ setImageData('viewer-2', buffer2, 200, 200, 'f64');
 
 ## Integration with JupyterLab
 
-This package is designed to be used as the image viewer backend for [jupyterlab-fitsview](https://github.com/yourusername/jupyterlab-fitsview).
+This package is designed to be used as the image viewer backend for [jupyterlab-fitsview](https://github.com/joseph-long/jupyterlab-fitsview). It can also be embedded as a widget within a notebook using [pyviewarr](https://github.com/joseph-long/pyviewarr).
 
 ## License
 
