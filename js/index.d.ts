@@ -46,21 +46,6 @@ export function setImageData(
 ): void;
 
 /**
- * Notify a viewer that its container has been resized.
- * This is typically called automatically by ResizeObserver,
- * but can be called manually if needed.
- *
- * @param containerId - The ID of the container (viewer instance).
- * @param width - New width in pixels.
- * @param height - New height in pixels.
- */
-export function notifyResize(
-  containerId: string,
-  width: number,
-  height: number
-): void;
-
-/**
  * Destroy a viewer instance and clean up resources.
  *
  * @param containerId - The ID of the container (viewer instance).
@@ -85,7 +70,6 @@ export function getActiveViewers(): string[];
 declare const viewarr: {
   createViewer: typeof createViewer;
   setImageData: typeof setImageData;
-  notifyResize: typeof notifyResize;
   destroyViewer: typeof destroyViewer;
   hasViewer: typeof hasViewer;
   getActiveViewers: typeof getActiveViewers;

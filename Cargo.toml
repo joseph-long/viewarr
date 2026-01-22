@@ -2,10 +2,10 @@
 name = "viewarr"
 version = "0.1.0"
 edition = "2021"
-authors = ["Your Name <your.email@example.com>"]
+authors = ["Joseph D. Long <me@joseph-long.com>"]
 license = "MIT"
 description = "A browser-based array/image viewer using Rust, WASM, and egui"
-repository = "https://github.com/yourusername/viewarr"
+repository = "https://github.com/joseph-long/viewarr"
 
 [lib]
 crate-type = ["cdylib", "rlib"]

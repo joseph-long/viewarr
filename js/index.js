@@ -90,7 +90,6 @@ export async function createViewer(containerId) {
     viewers.set(containerId, {
       handle,
       canvas,
-      resizeObserver,
       container
     });
 
@@ -98,11 +97,10 @@ export async function createViewer(containerId) {
     const mutationObserver = new MutationObserver((mutations) => {
       mutations.forEach((mutation) => {
         mutation.removedNodes.forEach((node) => {
-          console.debug("removed node", node);
           if (node === container || node.contains(container)) {
-            console.debug("contains viewer, destroying");
+            console.debug(`Cleaning up viewer ${containerId} because its DOM node went away...`);
             destroyViewer(containerId);
-            console.debug("canceling observer");
+            console.debug(`Done cleaning up viewer ${containerId}.`);
             mutationObserver.disconnect();
           }
         });
@@ -189,9 +187,6 @@ export function destroyViewer(containerId) {
   }
   viewer.handle.destroy();
 
-  // Stop observing resize
-  viewer.resizeObserver.disconnect();
-
   // Stop observing mutations
   if (viewer.mutationObserver) {
     viewer.mutationObserver.disconnect();
@@ -226,7 +221,6 @@ export function getActiveViewers() {
 window.viewarr = {
   createViewer,
   setImageData,
-  notifyResize,
   destroyViewer,
   hasViewer,
   getActiveViewers
@@ -236,7 +230,6 @@ window.viewarr = {
 export default {
   createViewer,
   setImageData,
-  notifyResize,
   destroyViewer,
   hasViewer,
   getActiveViewers

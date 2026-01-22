@@ -39,11 +39,11 @@ pub struct ViewerHandle {
     runner: eframe::WebRunner,
 }
 
-#[wasm_bindgen(start)]
-fn init_logging() {
-    // Initialize the logger
-    console_log::init_with_level(log::Level::Debug).expect("error initializing logger");
-}
+// #[wasm_bindgen(start)]
+// fn init_logging() {
+//     // Initialize the logger
+//     console_log::init_with_level(log::Level::Debug).expect("error initializing logger");
+// }
 
 
 #[wasm_bindgen]
