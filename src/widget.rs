@@ -336,6 +336,23 @@ impl ArrayViewerWidget {
         }
     }
 
+    /// Set contrast value directly (clamped to valid range)
+    pub fn set_contrast(&mut self, contrast: f64) {
+        let cb = self.current_contrast_bias_mut();
+        cb.contrast = contrast.clamp(MIN_CONTRAST, MAX_CONTRAST);
+        self.texture_dirty = true;
+    }
+
+    /// Set bias value directly (clamped to valid range)
+    /// Note: In symmetric mode, bias is ignored (always 0.5)
+    pub fn set_bias(&mut self, bias: f64) {
+        if !self.symmetric_mode {
+            let cb = self.current_contrast_bias_mut();
+            cb.bias = bias.clamp(0.0, 1.0);
+            self.texture_dirty = true;
+        }
+    }
+
     /// Adjust contrast/bias based on mouse drag delta
     pub fn adjust_contrast_bias(&mut self, dx: f32, dy: f32, viewport_size: Vec2) {
         // Check symmetric mode before borrowing mutably

@@ -218,12 +218,253 @@ export function getActiveViewers() {
   return Array.from(viewers.keys());
 }
 
+// =========================================================================
+// Contrast/Bias/Stretch getters and setters
+// =========================================================================
+
+/**
+ * Get current contrast value for a viewer.
+ *
+ * @param {string} containerId - The ID of the container (viewer instance).
+ * @returns {number} Contrast value (0.0 to 10.0, default 1.0).
+ * @throws {Error} If the viewer is not found.
+ */
+export function getContrast(containerId) {
+  const viewer = viewers.get(containerId);
+  if (!viewer) {
+    throw new Error(`No viewer found for container "${containerId}"`);
+  }
+  return viewer.handle.getContrast();
+}
+
+/**
+ * Set contrast value for a viewer.
+ *
+ * @param {string} containerId - The ID of the container (viewer instance).
+ * @param {number} contrast - Contrast value (0.0 to 10.0).
+ * @throws {Error} If the viewer is not found.
+ */
+export function setContrast(containerId, contrast) {
+  const viewer = viewers.get(containerId);
+  if (!viewer) {
+    throw new Error(`No viewer found for container "${containerId}"`);
+  }
+  viewer.handle.setContrast(contrast);
+}
+
+/**
+ * Get current bias value for a viewer.
+ *
+ * @param {string} containerId - The ID of the container (viewer instance).
+ * @returns {number} Bias value (0.0 to 1.0, default 0.5).
+ * @throws {Error} If the viewer is not found.
+ */
+export function getBias(containerId) {
+  const viewer = viewers.get(containerId);
+  if (!viewer) {
+    throw new Error(`No viewer found for container "${containerId}"`);
+  }
+  return viewer.handle.getBias();
+}
+
+/**
+ * Set bias value for a viewer.
+ *
+ * @param {string} containerId - The ID of the container (viewer instance).
+ * @param {number} bias - Bias value (0.0 to 1.0).
+ * @throws {Error} If the viewer is not found.
+ */
+export function setBias(containerId, bias) {
+  const viewer = viewers.get(containerId);
+  if (!viewer) {
+    throw new Error(`No viewer found for container "${containerId}"`);
+  }
+  viewer.handle.setBias(bias);
+}
+
+/**
+ * Get current stretch mode for a viewer.
+ *
+ * @param {string} containerId - The ID of the container (viewer instance).
+ * @returns {string} Stretch mode: "linear", "log", or "symmetric".
+ * @throws {Error} If the viewer is not found.
+ */
+export function getStretchMode(containerId) {
+  const viewer = viewers.get(containerId);
+  if (!viewer) {
+    throw new Error(`No viewer found for container "${containerId}"`);
+  }
+  return viewer.handle.getStretchMode();
+}
+
+/**
+ * Set stretch mode for a viewer.
+ *
+ * @param {string} containerId - The ID of the container (viewer instance).
+ * @param {string} mode - Stretch mode: "linear", "log", or "symmetric".
+ * @throws {Error} If the viewer is not found.
+ */
+export function setStretchMode(containerId, mode) {
+  const viewer = viewers.get(containerId);
+  if (!viewer) {
+    throw new Error(`No viewer found for container "${containerId}"`);
+  }
+  viewer.handle.setStretchMode(mode);
+}
+
+/**
+ * Get visible image bounds in pixel coordinates.
+ *
+ * @param {string} containerId - The ID of the container (viewer instance).
+ * @returns {number[]} Array [xmin, xmax, ymin, ymax] in pixel coordinates.
+ * @throws {Error} If the viewer is not found.
+ */
+export function getViewBounds(containerId) {
+  const viewer = viewers.get(containerId);
+  if (!viewer) {
+    throw new Error(`No viewer found for container "${containerId}"`);
+  }
+  // Get viewport dimensions from the container
+  const rect = viewer.container.getBoundingClientRect();
+  const bounds = viewer.handle.getViewBounds(rect.width, rect.height);
+  return Array.from(bounds);
+}
+
+/**
+ * Set view to show specific image bounds.
+ *
+ * @param {string} containerId - The ID of the container (viewer instance).
+ * @param {number} xmin - Minimum x coordinate in pixels.
+ * @param {number} xmax - Maximum x coordinate in pixels.
+ * @param {number} ymin - Minimum y coordinate in pixels.
+ * @param {number} ymax - Maximum y coordinate in pixels.
+ * @throws {Error} If the viewer is not found.
+ */
+export function setViewBounds(containerId, xmin, xmax, ymin, ymax) {
+  const viewer = viewers.get(containerId);
+  if (!viewer) {
+    throw new Error(`No viewer found for container "${containerId}"`);
+  }
+  // Get viewport dimensions from the container
+  const rect = viewer.container.getBoundingClientRect();
+  viewer.handle.setViewBounds(xmin, xmax, ymin, ymax, rect.width, rect.height);
+}
+
+/**
+ * Get the colormap name for a viewer.
+ *
+ * @param {string} containerId - The ID of the container (viewer instance).
+ * @returns {string} Colormap name (e.g., "Gray", "Inferno", "Magma", "RdBu").
+ * @throws {Error} If the viewer is not found.
+ */
+export function getColormap(containerId) {
+  const viewer = viewers.get(containerId);
+  if (!viewer) {
+    throw new Error(`No viewer found for container "${containerId}"`);
+  }
+  return viewer.handle.getColormap();
+}
+
+/**
+ * Get whether the colormap is reversed.
+ *
+ * @param {string} containerId - The ID of the container (viewer instance).
+ * @returns {boolean} True if the colormap is reversed.
+ * @throws {Error} If the viewer is not found.
+ */
+export function getColormapReversed(containerId) {
+  const viewer = viewers.get(containerId);
+  if (!viewer) {
+    throw new Error(`No viewer found for container "${containerId}"`);
+  }
+  return viewer.handle.getColormapReversed();
+}
+
+/**
+ * Get the image value range (vmin, vmax).
+ *
+ * @param {string} containerId - The ID of the container (viewer instance).
+ * @returns {number[]} Array [vmin, vmax].
+ * @throws {Error} If the viewer is not found.
+ */
+export function getValueRange(containerId) {
+  const viewer = viewers.get(containerId);
+  if (!viewer) {
+    throw new Error(`No viewer found for container "${containerId}"`);
+  }
+  const range = viewer.handle.getValueRange();
+  return Array.from(range);
+}
+
+/**
+ * Register a callback to be called when the viewer state changes.
+ *
+ * The callback receives an object with the current state:
+ * { contrast, bias, stretchMode, zoom, colormap, colormapReversed, vmin, vmax, xlim, ylim }
+ *
+ * @param {string} containerId - The ID of the container (viewer instance).
+ * @param {Function} callback - Callback function to receive state updates.
+ * @throws {Error} If the viewer is not found.
+ */
+export function onStateChange(containerId, callback) {
+  const viewer = viewers.get(containerId);
+  if (!viewer) {
+    throw new Error(`No viewer found for container "${containerId}"`);
+  }
+  viewer.handle.onStateChange(callback);
+}
+
+/**
+ * Register a callback to be called when the user clicks in the viewer.
+ *
+ * The callback receives the click coordinates in data space: { x, y, value }
+ *
+ * @param {string} containerId - The ID of the container (viewer instance).
+ * @param {Function} callback - Callback function to receive click events.
+ * @throws {Error} If the viewer is not found.
+ */
+export function onClick(containerId, callback) {
+  const viewer = viewers.get(containerId);
+  if (!viewer) {
+    throw new Error(`No viewer found for container "${containerId}"`);
+  }
+  viewer.handle.onClick(callback);
+}
+
+/**
+ * Clear all registered callbacks for a viewer.
+ *
+ * @param {string} containerId - The ID of the container (viewer instance).
+ * @throws {Error} If the viewer is not found.
+ */
+export function clearCallbacks(containerId) {
+  const viewer = viewers.get(containerId);
+  if (!viewer) {
+    throw new Error(`No viewer found for container "${containerId}"`);
+  }
+  viewer.handle.clearCallbacks();
+}
+
 window.viewarr = {
   createViewer,
   setImageData,
   destroyViewer,
   hasViewer,
-  getActiveViewers
+  getActiveViewers,
+  getContrast,
+  setContrast,
+  getBias,
+  setBias,
+  getStretchMode,
+  setStretchMode,
+  getViewBounds,
+  setViewBounds,
+  getColormap,
+  getColormapReversed,
+  getValueRange,
+  onStateChange,
+  onClick,
+  clearCallbacks
 };
 
 // Default export for convenience
@@ -232,5 +473,19 @@ export default {
   setImageData,
   destroyViewer,
   hasViewer,
-  getActiveViewers
+  getActiveViewers,
+  getContrast,
+  setContrast,
+  getBias,
+  setBias,
+  getStretchMode,
+  setStretchMode,
+  getViewBounds,
+  setViewBounds,
+  getColormap,
+  getColormapReversed,
+  getValueRange,
+  onStateChange,
+  onClick,
+  clearCallbacks
 };

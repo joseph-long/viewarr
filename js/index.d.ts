@@ -67,12 +67,181 @@ export function hasViewer(containerId: string): boolean;
  */
 export function getActiveViewers(): string[];
 
+/**
+ * Get current contrast value for a viewer.
+ *
+ * @param containerId - The ID of the container (viewer instance).
+ * @returns Contrast value (0.0 to 10.0, default 1.0).
+ */
+export function getContrast(containerId: string): number;
+
+/**
+ * Set contrast value for a viewer.
+ *
+ * @param containerId - The ID of the container (viewer instance).
+ * @param contrast - Contrast value (0.0 to 10.0).
+ */
+export function setContrast(containerId: string, contrast: number): void;
+
+/**
+ * Get current bias value for a viewer.
+ *
+ * @param containerId - The ID of the container (viewer instance).
+ * @returns Bias value (0.0 to 1.0, default 0.5).
+ */
+export function getBias(containerId: string): number;
+
+/**
+ * Set bias value for a viewer.
+ *
+ * @param containerId - The ID of the container (viewer instance).
+ * @param bias - Bias value (0.0 to 1.0).
+ */
+export function setBias(containerId: string, bias: number): void;
+
+/**
+ * Get current stretch mode for a viewer.
+ *
+ * @param containerId - The ID of the container (viewer instance).
+ * @returns Stretch mode: "linear", "log", or "symmetric".
+ */
+export function getStretchMode(containerId: string): string;
+
+/**
+ * Set stretch mode for a viewer.
+ *
+ * @param containerId - The ID of the container (viewer instance).
+ * @param mode - Stretch mode: "linear", "log", or "symmetric".
+ */
+export function setStretchMode(containerId: string, mode: string): void;
+
+/**
+ * Get visible image bounds in pixel coordinates.
+ *
+ * @param containerId - The ID of the container (viewer instance).
+ * @returns Array [xmin, xmax, ymin, ymax] in pixel coordinates.
+ */
+export function getViewBounds(containerId: string): [number, number, number, number];
+
+/**
+ * Set view to show specific image bounds.
+ *
+ * @param containerId - The ID of the container (viewer instance).
+ * @param xmin - Minimum x coordinate in pixels.
+ * @param xmax - Maximum x coordinate in pixels.
+ * @param ymin - Minimum y coordinate in pixels.
+ * @param ymax - Maximum y coordinate in pixels.
+ */
+export function setViewBounds(
+  containerId: string,
+  xmin: number,
+  xmax: number,
+  ymin: number,
+  ymax: number
+): void;
+
+/**
+ * Get the colormap name for a viewer.
+ *
+ * @param containerId - The ID of the container (viewer instance).
+ * @returns Colormap name (e.g., "Gray", "Inferno", "Magma", "RdBu").
+ */
+export function getColormap(containerId: string): string;
+
+/**
+ * Get whether the colormap is reversed.
+ *
+ * @param containerId - The ID of the container (viewer instance).
+ * @returns True if the colormap is reversed.
+ */
+export function getColormapReversed(containerId: string): boolean;
+
+/**
+ * Get the image value range (vmin, vmax).
+ *
+ * @param containerId - The ID of the container (viewer instance).
+ * @returns Array [vmin, vmax].
+ */
+export function getValueRange(containerId: string): [number, number];
+
+/**
+ * State object passed to state change callbacks.
+ */
+export interface ViewerState {
+  contrast: number;
+  bias: number;
+  stretchMode: string;
+  zoom: number;
+  colormap: string;
+  colormapReversed: boolean;
+  vmin: number;
+  vmax: number;
+  xlim?: [number, number];
+  ylim?: [number, number];
+}
+
+/**
+ * Click event object passed to click callbacks.
+ */
+export interface ClickEvent {
+  x: number;
+  y: number;
+  value?: number;
+}
+
+/**
+ * Register a callback to be called when the viewer state changes.
+ *
+ * The callback receives an object with the current state.
+ *
+ * @param containerId - The ID of the container (viewer instance).
+ * @param callback - Callback function to receive state updates.
+ */
+export function onStateChange(
+  containerId: string,
+  callback: (state: ViewerState) => void
+): void;
+
+/**
+ * Register a callback to be called when the user clicks in the viewer.
+ *
+ * The callback receives the click coordinates in data space.
+ *
+ * @param containerId - The ID of the container (viewer instance).
+ * @param callback - Callback function to receive click events.
+ */
+export function onClick(
+  containerId: string,
+  callback: (event: ClickEvent) => void
+): void;
+
+/**
+ * Clear all registered callbacks for a viewer.
+ *
+ * @param containerId - The ID of the container (viewer instance).
+ */
+export function clearCallbacks(containerId: string): void;
+
 declare const viewarr: {
   createViewer: typeof createViewer;
   setImageData: typeof setImageData;
   destroyViewer: typeof destroyViewer;
   hasViewer: typeof hasViewer;
   getActiveViewers: typeof getActiveViewers;
+  getContrast: typeof getContrast;
+  setContrast: typeof setContrast;
+  getBias: typeof getBias;
+  setBias: typeof setBias;
+  getStretchMode: typeof getStretchMode;
+  setStretchMode: typeof setStretchMode;
+  getViewBounds: typeof getViewBounds;
+  setViewBounds: typeof setViewBounds;
+  getColormap: typeof getColormap;
+  getColormapReversed: typeof getColormapReversed;
+  getValueRange: typeof getValueRange;
+  onStateChange: typeof onStateChange;
+  onClick: typeof onClick;
+  clearCallbacks: typeof clearCallbacks;
 };
 
 export default viewarr;
