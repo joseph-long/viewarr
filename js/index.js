@@ -396,6 +396,102 @@ export function getValueRange(containerId) {
   return Array.from(range);
 }
 
+// =========================================================================
+// Rotation getters and setters
+// =========================================================================
+
+/**
+ * Get current rotation angle in degrees (counter-clockwise).
+ *
+ * @param {string} containerId - The ID of the container (viewer instance).
+ * @returns {number} Rotation angle in degrees.
+ * @throws {Error} If the viewer is not found.
+ */
+export function getRotation(containerId) {
+  const viewer = viewers.get(containerId);
+  if (!viewer) {
+    throw new Error(`No viewer found for container "${containerId}"`);
+  }
+  return viewer.handle.getRotation();
+}
+
+/**
+ * Set rotation angle in degrees (counter-clockwise).
+ *
+ * @param {string} containerId - The ID of the container (viewer instance).
+ * @param {number} degrees - Rotation angle in degrees.
+ * @throws {Error} If the viewer is not found.
+ */
+export function setRotation(containerId, degrees) {
+  const viewer = viewers.get(containerId);
+  if (!viewer) {
+    throw new Error(`No viewer found for container "${containerId}"`);
+  }
+  viewer.handle.setRotation(degrees);
+}
+
+/**
+ * Get pivot point in image coordinates.
+ *
+ * @param {string} containerId - The ID of the container (viewer instance).
+ * @returns {number[]} Array [x, y] in image coordinates.
+ * @throws {Error} If the viewer is not found.
+ */
+export function getPivotPoint(containerId) {
+  const viewer = viewers.get(containerId);
+  if (!viewer) {
+    throw new Error(`No viewer found for container "${containerId}"`);
+  }
+  const pivot = viewer.handle.getPivotPoint();
+  return Array.from(pivot);
+}
+
+/**
+ * Set pivot point in image coordinates.
+ *
+ * @param {string} containerId - The ID of the container (viewer instance).
+ * @param {number} x - X coordinate in image pixels.
+ * @param {number} y - Y coordinate in image pixels.
+ * @throws {Error} If the viewer is not found.
+ */
+export function setPivotPoint(containerId, x, y) {
+  const viewer = viewers.get(containerId);
+  if (!viewer) {
+    throw new Error(`No viewer found for container "${containerId}"`);
+  }
+  viewer.handle.setPivotPoint(x, y);
+}
+
+/**
+ * Get whether the pivot marker is visible.
+ *
+ * @param {string} containerId - The ID of the container (viewer instance).
+ * @returns {boolean} True if the pivot marker is visible.
+ * @throws {Error} If the viewer is not found.
+ */
+export function getShowPivotMarker(containerId) {
+  const viewer = viewers.get(containerId);
+  if (!viewer) {
+    throw new Error(`No viewer found for container "${containerId}"`);
+  }
+  return viewer.handle.getShowPivotMarker();
+}
+
+/**
+ * Set whether to show the pivot marker.
+ *
+ * @param {string} containerId - The ID of the container (viewer instance).
+ * @param {boolean} show - True to show the pivot marker.
+ * @throws {Error} If the viewer is not found.
+ */
+export function setShowPivotMarker(containerId, show) {
+  const viewer = viewers.get(containerId);
+  if (!viewer) {
+    throw new Error(`No viewer found for container "${containerId}"`);
+  }
+  viewer.handle.setShowPivotMarker(show);
+}
+
 /**
  * Register a callback to be called when the viewer state changes.
  *
@@ -462,6 +558,12 @@ window.viewarr = {
   getColormap,
   getColormapReversed,
   getValueRange,
+  getRotation,
+  setRotation,
+  getPivotPoint,
+  setPivotPoint,
+  getShowPivotMarker,
+  setShowPivotMarker,
   onStateChange,
   onClick,
   clearCallbacks
@@ -485,6 +587,12 @@ export default {
   getColormap,
   getColormapReversed,
   getValueRange,
+  getRotation,
+  setRotation,
+  getPivotPoint,
+  setPivotPoint,
+  getShowPivotMarker,
+  setShowPivotMarker,
   onStateChange,
   onClick,
   clearCallbacks

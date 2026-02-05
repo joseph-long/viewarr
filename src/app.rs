@@ -7,6 +7,8 @@
 //! - Continuous repaint requests for smooth updates
 //! - Tracking state changes and calling JavaScript callbacks
 
+#![cfg(target_arch = "wasm32")]
+
 use std::cell::RefCell;
 use std::rc::Rc;
 
@@ -30,6 +32,10 @@ struct CachedState {
     vmax: f64,
     pan_x: f32,
     pan_y: f32,
+    rotation: f32,
+    pivot_x: f32,
+    pivot_y: f32,
+    show_pivot_marker: bool,
 }
 
 impl CachedState {
@@ -37,6 +43,7 @@ impl CachedState {
         let cb = widget.current_contrast_bias();
         let (vmin, vmax) = widget.value_range();
         let transform = widget.transform();
+        let (pivot_x, pivot_y) = widget.pivot_point();
         Self {
             contrast: cb.contrast,
             bias: cb.bias,
@@ -56,6 +63,10 @@ impl CachedState {
             vmax,
             pan_x: transform.pan_offset.x,
             pan_y: transform.pan_offset.y,
+            rotation: widget.rotation(),
+            pivot_x,
+            pivot_y,
+            show_pivot_marker: widget.show_pivot_marker(),
         }
     }
 
@@ -71,6 +82,10 @@ impl CachedState {
             || (self.vmax - other.vmax).abs() > 1e-10
             || (self.pan_x - other.pan_x).abs() > 0.5
             || (self.pan_y - other.pan_y).abs() > 0.5
+            || (self.rotation - other.rotation).abs() > 0.01
+            || (self.pivot_x - other.pivot_x).abs() > 0.01
+            || (self.pivot_y - other.pivot_y).abs() > 0.01
+            || self.show_pivot_marker != other.show_pivot_marker
     }
 }
 
@@ -173,6 +188,14 @@ impl ViewerApp {
                 js_sys::Reflect::set(&state, &"colormapReversed".into(), &current_state.colormap_reversed.into()).ok();
                 js_sys::Reflect::set(&state, &"vmin".into(), &current_state.vmin.into()).ok();
                 js_sys::Reflect::set(&state, &"vmax".into(), &current_state.vmax.into()).ok();
+                
+                // Include rotation state
+                js_sys::Reflect::set(&state, &"rotation".into(), &(current_state.rotation as f64).into()).ok();
+                let pivot = js_sys::Array::new();
+                pivot.push(&(current_state.pivot_x as f64).into());
+                pivot.push(&(current_state.pivot_y as f64).into());
+                js_sys::Reflect::set(&state, &"pivot".into(), &pivot).ok();
+                js_sys::Reflect::set(&state, &"showPivotMarker".into(), &current_state.show_pivot_marker.into()).ok();
 
                 // Include view bounds if available
                 if let Some((x_min, x_max, y_min, y_max)) = bounds_data {

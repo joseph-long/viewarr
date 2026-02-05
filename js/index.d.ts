@@ -165,6 +165,55 @@ export function getColormapReversed(containerId: string): boolean;
 export function getValueRange(containerId: string): [number, number];
 
 /**
+ * Get current rotation angle in degrees (counter-clockwise).
+ *
+ * @param containerId - The ID of the container (viewer instance).
+ * @returns Rotation angle in degrees.
+ */
+export function getRotation(containerId: string): number;
+
+/**
+ * Set rotation angle in degrees (counter-clockwise).
+ *
+ * @param containerId - The ID of the container (viewer instance).
+ * @param degrees - Rotation angle in degrees.
+ */
+export function setRotation(containerId: string, degrees: number): void;
+
+/**
+ * Get pivot point in image coordinates.
+ *
+ * @param containerId - The ID of the container (viewer instance).
+ * @returns Array [x, y] in image coordinates.
+ */
+export function getPivotPoint(containerId: string): [number, number];
+
+/**
+ * Set pivot point in image coordinates.
+ *
+ * @param containerId - The ID of the container (viewer instance).
+ * @param x - X coordinate in image pixels.
+ * @param y - Y coordinate in image pixels.
+ */
+export function setPivotPoint(containerId: string, x: number, y: number): void;
+
+/**
+ * Get whether the pivot marker is visible.
+ *
+ * @param containerId - The ID of the container (viewer instance).
+ * @returns True if the pivot marker is visible.
+ */
+export function getShowPivotMarker(containerId: string): boolean;
+
+/**
+ * Set whether to show the pivot marker.
+ *
+ * @param containerId - The ID of the container (viewer instance).
+ * @param show - True to show the pivot marker.
+ */
+export function setShowPivotMarker(containerId: string, show: boolean): void;
+
+/**
  * State object passed to state change callbacks.
  */
 export interface ViewerState {
@@ -178,6 +227,9 @@ export interface ViewerState {
   vmax: number;
   xlim?: [number, number];
   ylim?: [number, number];
+  rotation: number;
+  pivot: [number, number];
+  showPivotMarker: boolean;
 }
 
 /**
@@ -239,6 +291,12 @@ declare const viewarr: {
   getColormap: typeof getColormap;
   getColormapReversed: typeof getColormapReversed;
   getValueRange: typeof getValueRange;
+  getRotation: typeof getRotation;
+  setRotation: typeof setRotation;
+  getPivotPoint: typeof getPivotPoint;
+  setPivotPoint: typeof setPivotPoint;
+  getShowPivotMarker: typeof getShowPivotMarker;
+  setShowPivotMarker: typeof setShowPivotMarker;
   onStateChange: typeof onStateChange;
   onClick: typeof onClick;
   clearCallbacks: typeof clearCallbacks;

@@ -10,21 +10,29 @@
 //! - `ViewerApp`: Thin eframe App shell that hosts the widget
 //! - `ViewerHandle`: WASM interface for JavaScript to control the viewer
 
+#[cfg(target_arch = "wasm32")]
 use std::cell::RefCell;
+#[cfg(target_arch = "wasm32")]
 use std::rc::Rc;
+#[cfg(target_arch = "wasm32")]
 use wasm_bindgen::prelude::*;
+#[cfg(target_arch = "wasm32")]
 use web_sys::HtmlCanvasElement;
 
+#[cfg(target_arch = "wasm32")]
 mod app;
 mod colormap;
 mod colormap_luts;
 mod transform;
 mod widget;
 
+#[cfg(target_arch = "wasm32")]
 use app::ViewerApp;
+#[cfg(target_arch = "wasm32")]
 use widget::ArrayViewerWidget;
 
 /// Callbacks that can be registered from JavaScript
+#[cfg(target_arch = "wasm32")]
 #[derive(Default)]
 pub struct ViewerCallbacks {
     /// Called when viewer state changes (contrast, bias, zoom, pan, etc.)
@@ -32,6 +40,11 @@ pub struct ViewerCallbacks {
     /// Called when the user clicks on the image (with image coordinates and value)
     pub on_click: Option<js_sys::Function>,
 }
+
+/// Callbacks that can be registered from JavaScript
+#[cfg(not(target_arch = "wasm32"))]
+#[derive(Default)]
+pub struct ViewerCallbacks {}
 
 /// A handle to a viewer instance. Each handle manages its own canvas and state.
 ///
@@ -57,6 +70,7 @@ pub struct ViewerHandle {
 // }
 
 
+#[cfg(target_arch = "wasm32")]
 #[wasm_bindgen]
 impl ViewerHandle {
     /// Create a new viewer instance attached to the given canvas element.
@@ -191,6 +205,49 @@ impl ViewerHandle {
     #[wasm_bindgen(js_name = getZoom)]
     pub fn get_zoom(&self) -> f32 {
         self.widget.borrow().zoom_level()
+    }
+
+    // =========================================================================
+    // Rotation getters and setters
+    // =========================================================================
+
+    /// Get current rotation angle in degrees (counter-clockwise)
+    #[wasm_bindgen(js_name = getRotation)]
+    pub fn get_rotation(&self) -> f32 {
+        self.widget.borrow().rotation()
+    }
+
+    /// Set rotation angle in degrees (counter-clockwise)
+    #[wasm_bindgen(js_name = setRotation)]
+    pub fn set_rotation(&self, degrees: f32) {
+        self.widget.borrow_mut().set_rotation(degrees);
+    }
+
+    /// Get pivot point as [x, y] in image coordinates
+    #[wasm_bindgen(js_name = getPivotPoint)]
+    pub fn get_pivot_point(&self) -> js_sys::Float32Array {
+        let (x, y) = self.widget.borrow().pivot_point();
+        let result = js_sys::Float32Array::new_with_length(2);
+        result.copy_from(&[x, y]);
+        result
+    }
+
+    /// Set pivot point in image coordinates
+    #[wasm_bindgen(js_name = setPivotPoint)]
+    pub fn set_pivot_point(&self, x: f32, y: f32) {
+        self.widget.borrow_mut().set_pivot_point(x, y);
+    }
+
+    /// Get whether the pivot marker is visible
+    #[wasm_bindgen(js_name = getShowPivotMarker)]
+    pub fn get_show_pivot_marker(&self) -> bool {
+        self.widget.borrow().show_pivot_marker()
+    }
+
+    /// Set whether to show the pivot marker
+    #[wasm_bindgen(js_name = setShowPivotMarker)]
+    pub fn set_show_pivot_marker(&self, show: bool) {
+        self.widget.borrow_mut().set_show_pivot_marker(show);
     }
 
     // =========================================================================

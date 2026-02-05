@@ -29,12 +29,14 @@ const COLORBAR_MARGIN: f32 = 10.0;
 const ZOOM_OVERLAY_DURATION: f64 = 0.5;
 
 /// Actions returned from zoom controls overlay
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 enum ZoomAction {
     None,
     ZoomIn,
     ZoomOut,
     Reset,
+    RotateBy(f32),        // Rotate by delta degrees
+    TogglePivotMarker,    // Toggle pivot marker visibility
 }
 
 /// Actions returned from stretch controls overlay
@@ -105,8 +107,14 @@ pub struct ArrayViewerWidget {
     is_integer: bool,
 
     // === View transformation ===
-    /// Pan/zoom transformation state
+    /// Pan/zoom/rotation transformation state
     transform: ViewTransform,
+
+    // === Rotation UI state ===
+    /// Text buffer for rotation angle input (only applied on enter/defocus)
+    rotation_input_text: String,
+    /// Whether the rotation input field is currently focused
+    rotation_input_focused: bool,
 
     // === Stretch settings ===
     /// Current stretch type (Linear or Log)
@@ -164,6 +172,8 @@ impl ArrayViewerWidget {
             max_val: 1.0,
             is_integer: false,
             transform: ViewTransform::new(),
+            rotation_input_text: "0".to_string(),
+            rotation_input_focused: false,
             stretch_type: StretchType::default(),
             linear_cb: ContrastBias::default(),
             log_cb: ContrastBias::default(),
@@ -230,6 +240,8 @@ impl ArrayViewerWidget {
         // Only reset pan if dimensions changed; always keep zoom
         if dimensions_changed {
             self.transform.reset_pan();
+            // Initialize pivot point to image center when dimensions change
+            self.transform.set_pivot_to_center(width, height);
         }
     }
 
@@ -253,9 +265,9 @@ impl ArrayViewerWidget {
         self.transform.zoom_out(center, viewport_center);
     }
 
-    /// Reset to fit-to-view
+    /// Reset zoom and pan to fit-to-view (preserves rotation and pivot)
     pub fn zoom_to_fit(&mut self) {
-        self.transform.reset();
+        self.transform.reset_zoom_and_pan();
     }
 
     /// Get current zoom level (1.0 = fit to view)
@@ -276,6 +288,44 @@ impl ArrayViewerWidget {
     /// Check if view is at default state
     pub fn is_default_view(&self) -> bool {
         self.transform.is_default()
+    }
+
+    // =========================================================================
+    // Rotation API
+    // =========================================================================
+
+    /// Get rotation angle in degrees (counter-clockwise)
+    pub fn rotation(&self) -> f32 {
+        self.transform.rotation()
+    }
+
+    /// Set rotation angle in degrees (counter-clockwise)
+    pub fn set_rotation(&mut self, degrees: f32) {
+        self.transform.set_rotation(degrees);
+        // Only update the input text if user is not currently editing
+        if !self.rotation_input_focused {
+            self.rotation_input_text = format!("{:.1}", self.transform.rotation());
+        }
+    }
+
+    /// Get pivot point in image coordinates
+    pub fn pivot_point(&self) -> (f32, f32) {
+        self.transform.pivot_point()
+    }
+
+    /// Set pivot point in image coordinates
+    pub fn set_pivot_point(&mut self, x: f32, y: f32) {
+        self.transform.set_pivot_point(x, y);
+    }
+
+    /// Get whether pivot marker is shown
+    pub fn show_pivot_marker(&self) -> bool {
+        self.transform.show_pivot_marker
+    }
+
+    /// Set whether pivot marker is shown
+    pub fn set_show_pivot_marker(&mut self, show: bool) {
+        self.transform.show_pivot_marker = show;
     }
 
     // =========================================================================
@@ -652,16 +702,66 @@ impl ArrayViewerWidget {
         let image_rect = self.transform.calculate_image_rect(viewport_rect, base_display_size);
         let viewport_center = viewport_rect.center();
 
-        // Draw the image
+        // Draw the image with rotation
         if let Some(texture) = &self.texture {
             let painter = ui.painter_at(rect);
-            // Flip Y-axis for FITS convention: Y=0 at bottom
-            painter.image(
-                texture.id(),
-                image_rect,
-                egui::Rect::from_min_max(egui::pos2(0.0, 1.0), egui::pos2(1.0, 0.0)),
-                egui::Color32::WHITE,
-            );
+            
+            if self.transform.rotation().abs() < 0.001 {
+                // No rotation - use simple image draw (faster)
+                // Flip Y-axis for FITS convention: Y=0 at bottom
+                painter.image(
+                    texture.id(),
+                    image_rect,
+                    egui::Rect::from_min_max(egui::pos2(0.0, 1.0), egui::pos2(1.0, 0.0)),
+                    egui::Color32::WHITE,
+                );
+            } else {
+                // With rotation - use mesh with rotated vertices
+                let pivot_screen = self.transform.pivot_to_screen(image_rect, (img_width, img_height));
+                let rotation_rad = self.transform.rotation().to_radians();
+                let cos_r = rotation_rad.cos();
+                let sin_r = rotation_rad.sin();
+                
+                // Helper to rotate a point around pivot
+                let rotate = |p: egui::Pos2| -> egui::Pos2 {
+                    let dx = p.x - pivot_screen.x;
+                    let dy = p.y - pivot_screen.y;
+                    egui::pos2(
+                        pivot_screen.x + dx * cos_r - dy * sin_r,
+                        pivot_screen.y + dx * sin_r + dy * cos_r,
+                    )
+                };
+                
+                // Calculate rotated corners
+                let tl = rotate(image_rect.left_top());
+                let tr = rotate(image_rect.right_top());
+                let br = rotate(image_rect.right_bottom());
+                let bl = rotate(image_rect.left_bottom());
+                
+                // UV coordinates (Y-flipped for FITS convention)
+                let uv_tl = egui::pos2(0.0, 1.0);
+                let uv_tr = egui::pos2(1.0, 1.0);
+                let uv_br = egui::pos2(1.0, 0.0);
+                let uv_bl = egui::pos2(0.0, 0.0);
+                
+                // Build mesh with two triangles using Vertex struct
+                let mut mesh = egui::Mesh::with_texture(texture.id());
+                let color = egui::Color32::WHITE;
+                mesh.vertices.push(egui::epaint::Vertex { pos: tl, uv: uv_tl, color });
+                mesh.vertices.push(egui::epaint::Vertex { pos: tr, uv: uv_tr, color });
+                mesh.vertices.push(egui::epaint::Vertex { pos: br, uv: uv_br, color });
+                mesh.vertices.push(egui::epaint::Vertex { pos: bl, uv: uv_bl, color });
+                mesh.add_triangle(0, 1, 2);
+                mesh.add_triangle(0, 2, 3);
+                
+                painter.add(egui::Shape::mesh(mesh));
+            }
+            
+            // Draw pivot marker if enabled
+            if self.transform.show_pivot_marker {
+                let pivot_screen = self.transform.pivot_to_screen(image_rect, (img_width, img_height));
+                self.render_pivot_marker(&painter, pivot_screen);
+            }
         }
 
         // Handle mouse wheel zoom
@@ -718,28 +818,27 @@ impl ArrayViewerWidget {
             self.is_adjusting_stretch = false;
         }
 
-        // Handle alt+click to center on point
+        // Handle alt+click to set rotation pivot point
+        // Use screen_to_image_for_pivot (not rotated) so the marker appears at click location
         let modifiers = ui.input(|i| i.modifiers);
         if response.clicked() && modifiers.alt {
             if let Some(click_pos) = response.interact_pointer_pos() {
-                if let Some((img_x, img_y)) = self.transform.screen_to_image(
+                if let Some((img_x, img_y)) = self.transform.screen_to_image_for_pivot(
                     click_pos,
                     image_rect,
                     (img_width, img_height),
                 ) {
-                    self.transform.center_on_image_point(
-                        egui::pos2(img_x as f32, img_y as f32),
-                        egui::vec2(img_width as f32, img_height as f32),
-                        available_size,
-                        egui::Rect::from_center_size(viewport_center, base_display_size),
-                    );
+                    // Set the pivot point to the clicked location
+                    self.transform.set_pivot_point(img_x as f32, img_y as f32);
+                    // Show the pivot marker when user sets it
+                    self.transform.show_pivot_marker = true;
                 }
             }
         }
 
-        // Handle hover to show pixel value
+        // Handle hover to show pixel value (using rotation-aware conversion)
         if let Some(hover_pos) = response.hover_pos() {
-            if let Some((img_x, img_y)) = self.transform.screen_to_image(
+            if let Some((img_x, img_y)) = self.transform.screen_to_image_rotated(
                 hover_pos,
                 image_rect,
                 (img_width, img_height),
@@ -767,6 +866,7 @@ impl ArrayViewerWidget {
         // Render overlays using Areas (they render at screen coordinates)
         // We collect actions from overlays and apply them after rendering
         let zoom_action = self.render_zoom_controls(&ctx, viewport_center, rect);
+        let rotation_action = self.render_rotation_controls(&ctx, rect);
         let stretch_action = self.render_stretch_controls(&ctx, rect);
         self.render_colorbar(&ctx, rect);
         self.render_stretch_info_overlay(&ctx, rect);
@@ -774,12 +874,23 @@ impl ArrayViewerWidget {
         self.render_hover_overlay(&ctx, rect);
         self.render_build_info(&ctx, rect);
 
-        // Apply collected actions
-        match zoom_action {
+        // Apply collected actions (combine zoom and rotation actions)
+        let combined_zoom_action = if zoom_action != ZoomAction::None { zoom_action } else { rotation_action };
+        match combined_zoom_action {
             ZoomAction::None => {}
             ZoomAction::ZoomIn => self.zoom_in(None, viewport_center),
             ZoomAction::ZoomOut => self.zoom_out(None, viewport_center),
             ZoomAction::Reset => self.zoom_to_fit(),
+            ZoomAction::RotateBy(delta) => {
+                self.transform.rotate_by(delta);
+                // Only update text if user is not currently editing
+                if !self.rotation_input_focused {
+                    self.rotation_input_text = format!("{:.1}", self.transform.rotation());
+                }
+            }
+            ZoomAction::TogglePivotMarker => {
+                self.transform.show_pivot_marker = !self.transform.show_pivot_marker;
+            }
         }
 
         match stretch_action {
@@ -806,6 +917,11 @@ impl ArrayViewerWidget {
 
     /// Handle keyboard shortcuts for zoom
     fn handle_keyboard_input(&mut self, ctx: &egui::Context) {
+        // Don't process keyboard shortcuts when text input is focused
+        if self.rotation_input_focused {
+            return;
+        }
+
         let viewport_center = ctx.viewport(|vp| vp.this_pass.available_rect.center());
 
         ctx.input(|i| {
@@ -871,6 +987,94 @@ impl ArrayViewerWidget {
                         ).fill(Color32::TRANSPARENT);
                         if ui.add_sized(button_size, plus_btn).clicked() {
                             action = ZoomAction::ZoomIn;
+                        }
+                    });
+                });
+            });
+
+        action
+    }
+
+    /// Render rotation controls at bottom-left of widget.
+    /// Returns an action to be applied after rendering.
+    fn render_rotation_controls(&mut self, ctx: &egui::Context, widget_rect: egui::Rect) -> ZoomAction {
+        let button_size = egui::vec2(28.0, 28.0);
+        let small_button_size = egui::vec2(24.0, 28.0);
+        let margin = 10.0;
+        let spacing = 4.0;
+
+        let base_x = widget_rect.min.x + margin;
+        let base_y = widget_rect.max.y - margin - button_size.y;
+
+        let mut action = ZoomAction::None;
+
+        egui::Area::new(egui::Id::new("rotation_controls"))
+            .fixed_pos(egui::pos2(base_x, base_y))
+            .show(ctx, |ui| {
+                let frame_style = overlay_frame(ui);
+                let text_color = get_overlay_text_color(ui);
+
+                frame_style.show(ui, |ui| {
+                    ui.horizontal(|ui| {
+                        ui.spacing_mut().item_spacing.x = spacing;
+
+                        // Pivot marker toggle button
+                        let pivot_label = if self.transform.show_pivot_marker { "⊕" } else { "⊙" };
+                        let pivot_btn = egui::Button::new(
+                            egui::RichText::new(pivot_label).color(text_color)
+                        ).fill(Color32::TRANSPARENT);
+                        let pivot_response = ui.add_sized(button_size, pivot_btn);
+                        if pivot_response.clicked() {
+                            action = ZoomAction::TogglePivotMarker;
+                        }
+                        pivot_response.on_hover_text("Toggle rotation pivot marker (Alt+click to move)");
+
+                        ui.separator();
+
+                        // Rotate CCW (minus) button
+                        let ccw_btn = egui::Button::new(
+                            egui::RichText::new("↺").color(text_color)
+                        ).fill(Color32::TRANSPARENT);
+                        if ui.add_sized(small_button_size, ccw_btn).on_hover_text("Rotate 15° CCW").clicked() {
+                            action = ZoomAction::RotateBy(transform::ROTATION_STEP);
+                        }
+
+                        // Rotation angle text input
+                        let text_edit_width = 50.0;
+                        let text_edit = egui::TextEdit::singleline(&mut self.rotation_input_text)
+                            .desired_width(text_edit_width)
+                            .horizontal_align(egui::Align::Center)
+                            .font(egui::FontId::proportional(14.0));
+                        let response = ui.add(text_edit);
+                        
+                        // Track focus state
+                        if response.gained_focus() {
+                            self.rotation_input_focused = true;
+                        }
+                        
+                        // Apply rotation when Enter is pressed or field loses focus
+                        if response.lost_focus() || (self.rotation_input_focused && ui.input(|i| i.key_pressed(Key::Enter))) {
+                            self.rotation_input_focused = false;
+                            // Parse and apply the rotation
+                            if let Ok(degrees) = self.rotation_input_text.parse::<f32>() {
+                                let current = self.transform.rotation();
+                                if (degrees - current).abs() > 0.001 {
+                                    // Calculate the delta to rotate by
+                                    action = ZoomAction::RotateBy(degrees - current);
+                                }
+                            } else {
+                                // Reset text to current value on parse error
+                                self.rotation_input_text = format!("{:.1}", self.transform.rotation());
+                            }
+                        }
+                        response.on_hover_text("Rotation angle in degrees (CCW)");
+
+                        // Rotate CW (plus) button
+                        let cw_btn = egui::Button::new(
+                            egui::RichText::new("↻").color(text_color)
+                        ).fill(Color32::TRANSPARENT);
+                        if ui.add_sized(small_button_size, cw_btn).on_hover_text("Rotate 15° CW").clicked() {
+                            action = ZoomAction::RotateBy(-transform::ROTATION_STEP);
                         }
                     });
                 });
@@ -1122,6 +1326,32 @@ impl ArrayViewerWidget {
                         .small(),
                 );
             });
+    }
+
+    /// Render the rotation pivot marker at the given screen position
+    fn render_pivot_marker(&self, painter: &egui::Painter, screen_pos: egui::Pos2) {
+        let size = 12.0;
+        let stroke_color = egui::Color32::from_rgba_unmultiplied(255, 100, 100, 200);
+        let stroke = egui::Stroke::new(2.0, stroke_color);
+        
+        // Draw crosshair
+        painter.line_segment(
+            [
+                egui::pos2(screen_pos.x - size, screen_pos.y),
+                egui::pos2(screen_pos.x + size, screen_pos.y),
+            ],
+            stroke,
+        );
+        painter.line_segment(
+            [
+                egui::pos2(screen_pos.x, screen_pos.y - size),
+                egui::pos2(screen_pos.x, screen_pos.y + size),
+            ],
+            stroke,
+        );
+        
+        // Draw circle around crosshair
+        painter.circle_stroke(screen_pos, size * 0.7, stroke);
     }
 
     /// Render hover info overlay at bottom-left of widget
