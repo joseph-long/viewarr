@@ -448,6 +448,12 @@ impl ViewerHandle {
         result
     }
 
+    /// Set the image value range (vmin, vmax) for display scaling
+    #[wasm_bindgen(js_name = setValueRange)]
+    pub fn set_value_range(&self, min_val: f64, max_val: f64) {
+        self.widget.borrow_mut().set_value_range(min_val, max_val);
+    }
+
     // =========================================================================
     // Callback registration
     // =========================================================================

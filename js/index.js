@@ -79,6 +79,20 @@ export async function createViewer(containerId) {
       display: block;
     `;
 
+    // Prevent native browser drag behavior on the canvas
+    // This stops the browser from trying to drag the canvas content as an image
+    canvas.addEventListener('dragstart', (e) => {
+      e.preventDefault();
+    });
+    canvas.draggable = false;
+
+    // Also prevent default on mousedown with alt key to avoid browser-specific behaviors
+    canvas.addEventListener('mousedown', (e) => {
+      if (e.altKey) {
+        e.preventDefault();
+      }
+    });
+
     // Replace loading indicator with canvas
     container.innerHTML = '';
     container.appendChild(canvas);
@@ -396,6 +410,22 @@ export function getValueRange(containerId) {
   return Array.from(range);
 }
 
+/**
+ * Set the value range (vmin, vmax) for display scaling.
+ *
+ * @param {string} containerId - The ID of the container (viewer instance).
+ * @param {number} vmin - The minimum display value.
+ * @param {number} vmax - The maximum display value.
+ * @throws {Error} If the viewer is not found.
+ */
+export function setValueRange(containerId, vmin, vmax) {
+  const viewer = viewers.get(containerId);
+  if (!viewer) {
+    throw new Error(`No viewer found for container "${containerId}"`);
+  }
+  viewer.handle.setValueRange(vmin, vmax);
+}
+
 // =========================================================================
 // Rotation getters and setters
 // =========================================================================
@@ -558,6 +588,7 @@ window.viewarr = {
   getColormap,
   getColormapReversed,
   getValueRange,
+  setValueRange,
   getRotation,
   setRotation,
   getPivotPoint,
@@ -587,6 +618,7 @@ export default {
   getColormap,
   getColormapReversed,
   getValueRange,
+  setValueRange,
   getRotation,
   setRotation,
   getPivotPoint,

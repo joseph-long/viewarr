@@ -37,6 +37,8 @@ enum ZoomAction {
     Reset,
     RotateBy(f32),        // Rotate by delta degrees
     TogglePivotMarker,    // Toggle pivot marker visibility
+    ResetPivot,           // Reset pivot to image center
+    CenterOnPoint(f32, f32), // Center view on image point (x, y)
 }
 
 /// Actions returned from stretch controls overlay
@@ -103,6 +105,10 @@ pub struct ArrayViewerWidget {
     min_val: f64,
     /// Computed max value for scaling
     max_val: f64,
+    /// Original auto-computed min value (for reset)
+    original_min_val: f64,
+    /// Original auto-computed max value (for reset)
+    original_max_val: f64,
     /// Whether the source data is integer-typed (for display formatting)
     is_integer: bool,
 
@@ -115,6 +121,12 @@ pub struct ArrayViewerWidget {
     rotation_input_text: String,
     /// Whether the rotation input field is currently focused
     rotation_input_focused: bool,
+
+    // === Colorbar UI state ===
+    /// Text buffer for min limit input (only applied on enter/defocus)
+    min_limit_input_text: String,
+    /// Text buffer for max limit input (only applied on enter/defocus)
+    max_limit_input_text: String,
 
     // === Stretch settings ===
     /// Current stretch type (Linear or Log)
@@ -170,10 +182,14 @@ impl ArrayViewerWidget {
             height: 0,
             min_val: 0.0,
             max_val: 1.0,
+            original_min_val: 0.0,
+            original_max_val: 1.0,
             is_integer: false,
             transform: ViewTransform::new(),
             rotation_input_text: "0".to_string(),
             rotation_input_focused: false,
+            min_limit_input_text: "0".to_string(),
+            max_limit_input_text: "1".to_string(),
             stretch_type: StretchType::default(),
             linear_cb: ContrastBias::default(),
             log_cb: ContrastBias::default(),
@@ -234,6 +250,18 @@ impl ArrayViewerWidget {
         self.height = height;
         self.min_val = min_val;
         self.max_val = max_val;
+        self.original_min_val = min_val;
+        self.original_max_val = max_val;
+        self.min_limit_input_text = if is_integer {
+            format!("{}", min_val as i64)
+        } else {
+            format_scientific(min_val)
+        };
+        self.max_limit_input_text = if is_integer {
+            format!("{}", max_val as i64)
+        } else {
+            format_scientific(max_val)
+        };
         self.texture_dirty = true;
         self.is_integer = is_integer;
 
@@ -326,6 +354,14 @@ impl ArrayViewerWidget {
     /// Set whether pivot marker is shown
     pub fn set_show_pivot_marker(&mut self, show: bool) {
         self.transform.show_pivot_marker = show;
+    }
+
+    /// Check if pivot point is at the image center
+    pub fn is_pivot_at_center(&self) -> bool {
+        let center_x = (self.width as f32 - 1.0) / 2.0;
+        let center_y = (self.height as f32 - 1.0) / 2.0;
+        let (pivot_x, pivot_y) = self.transform.pivot_point();
+        (pivot_x - center_x).abs() < 0.5 && (pivot_y - center_y).abs() < 0.5
     }
 
     // =========================================================================
@@ -448,6 +484,40 @@ impl ArrayViewerWidget {
         }
     }
 
+    /// Check if min/max limits have been modified from original values
+    pub fn is_limits_modified(&self) -> bool {
+        (self.min_val - self.original_min_val).abs() > 1e-10
+            || (self.max_val - self.original_max_val).abs() > 1e-10
+    }
+
+    /// Check if any display settings (stretch or limits) have been modified
+    pub fn is_display_modified(&self) -> bool {
+        self.is_stretch_modified() || self.is_limits_modified()
+    }
+
+    /// Reset limits to original auto-computed values
+    pub fn reset_limits(&mut self) {
+        self.min_val = self.original_min_val;
+        self.max_val = self.original_max_val;
+        self.min_limit_input_text = if self.is_integer {
+            format!("{}", self.min_val as i64)
+        } else {
+            format_scientific(self.min_val)
+        };
+        self.max_limit_input_text = if self.is_integer {
+            format!("{}", self.max_val as i64)
+        } else {
+            format_scientific(self.max_val)
+        };
+        self.texture_dirty = true;
+    }
+
+    /// Reset all display settings (stretch and limits)
+    pub fn reset_display(&mut self) {
+        self.reset_current_stretch();
+        self.reset_limits();
+    }
+
     /// Set whether user is currently adjusting stretch
     pub fn set_adjusting_stretch(&mut self, adjusting: bool) {
         self.is_adjusting_stretch = adjusting;
@@ -534,6 +604,30 @@ impl ArrayViewerWidget {
     /// Get min/max values
     pub fn value_range(&self) -> (f64, f64) {
         (self.min_val, self.max_val)
+    }
+
+    /// Set the min value for scaling (marks texture dirty)
+    pub fn set_min_val(&mut self, min_val: f64) {
+        if (self.min_val - min_val).abs() > 1e-15 {
+            self.min_val = min_val;
+            self.min_limit_input_text = format_scientific(min_val);
+            self.texture_dirty = true;
+        }
+    }
+
+    /// Set the max value for scaling (marks texture dirty)
+    pub fn set_max_val(&mut self, max_val: f64) {
+        if (self.max_val - max_val).abs() > 1e-15 {
+            self.max_val = max_val;
+            self.max_limit_input_text = format_scientific(max_val);
+            self.texture_dirty = true;
+        }
+    }
+
+    /// Set both min and max values at once
+    pub fn set_value_range(&mut self, min_val: f64, max_val: f64) {
+        self.set_min_val(min_val);
+        self.set_max_val(max_val);
     }
 
     /// Check if source data is integer-typed
@@ -818,20 +912,38 @@ impl ArrayViewerWidget {
             self.is_adjusting_stretch = false;
         }
 
-        // Handle alt+click to set rotation pivot point
-        // Use screen_to_image_for_pivot (not rotated) so the marker appears at click location
+        // Handle modifier+click interactions:
+        // - Cmd/Ctrl+click: center view on clicked point
+        // - Cmd/Ctrl+Shift+click: set rotation pivot point
         let modifiers = ui.input(|i| i.modifiers);
-        if response.clicked() && modifiers.alt {
+        let has_cmd_or_ctrl = modifiers.command || modifiers.ctrl;
+        
+        if response.clicked() && has_cmd_or_ctrl {
             if let Some(click_pos) = response.interact_pointer_pos() {
-                if let Some((img_x, img_y)) = self.transform.screen_to_image_for_pivot(
-                    click_pos,
-                    image_rect,
-                    (img_width, img_height),
-                ) {
-                    // Set the pivot point to the clicked location
-                    self.transform.set_pivot_point(img_x as f32, img_y as f32);
-                    // Show the pivot marker when user sets it
-                    self.transform.show_pivot_marker = true;
+                if modifiers.shift {
+                    // Cmd/Ctrl+Shift+click: set pivot point
+                    if let Some((img_x, img_y)) = self.transform.screen_to_image_for_pivot(
+                        click_pos,
+                        image_rect,
+                        (img_width, img_height),
+                    ) {
+                        self.transform.set_pivot_point(img_x as f32, img_y as f32);
+                        self.transform.show_pivot_marker = true;
+                    }
+                } else {
+                    // Cmd/Ctrl+click: center view on point
+                    if let Some((img_x, img_y)) = self.transform.screen_to_image_rotated(
+                        click_pos,
+                        image_rect,
+                        (img_width, img_height),
+                    ) {
+                        self.transform.center_on_image_point(
+                            egui::pos2(img_x as f32, img_y as f32),
+                            egui::vec2(img_width as f32, img_height as f32),
+                            available_size,
+                            egui::Rect::from_center_size(viewport_center, base_display_size),
+                        );
+                    }
                 }
             }
         }
@@ -891,6 +1003,17 @@ impl ArrayViewerWidget {
             ZoomAction::TogglePivotMarker => {
                 self.transform.show_pivot_marker = !self.transform.show_pivot_marker;
             }
+            ZoomAction::ResetPivot => {
+                self.transform.set_pivot_to_center(self.width, self.height);
+            }
+            ZoomAction::CenterOnPoint(x, y) => {
+                self.transform.center_on_image_point(
+                    egui::pos2(x, y),
+                    egui::vec2(self.width as f32, self.height as f32),
+                    egui::vec2(0.0, 0.0), // Will be computed
+                    egui::Rect::NOTHING,
+                );
+            }
         }
 
         match stretch_action {
@@ -917,8 +1040,9 @@ impl ArrayViewerWidget {
 
     /// Handle keyboard shortcuts for zoom
     fn handle_keyboard_input(&mut self, ctx: &egui::Context) {
-        // Don't process keyboard shortcuts when text input is focused
-        if self.rotation_input_focused {
+        // Don't process keyboard shortcuts when any text input has focus
+        let anything_focused = ctx.memory(|m| m.focused().is_some());
+        if anything_focused {
             return;
         }
 
@@ -1018,16 +1142,35 @@ impl ArrayViewerWidget {
                     ui.horizontal(|ui| {
                         ui.spacing_mut().item_spacing.x = spacing;
 
-                        // Pivot marker toggle button
-                        let pivot_label = if self.transform.show_pivot_marker { "⊕" } else { "⊙" };
+                        // Pivot marker toggle button (using ASCII symbols)
+                        let pivot_label = if self.transform.show_pivot_marker { "o" } else { "+" };
                         let pivot_btn = egui::Button::new(
-                            egui::RichText::new(pivot_label).color(text_color)
+                            egui::RichText::new(pivot_label).color(text_color).size(16.0)
                         ).fill(Color32::TRANSPARENT);
                         let pivot_response = ui.add_sized(button_size, pivot_btn);
                         if pivot_response.clicked() {
                             action = ZoomAction::TogglePivotMarker;
                         }
-                        pivot_response.on_hover_text("Toggle rotation pivot marker (Alt+click to move)");
+                        pivot_response.on_hover_text("Toggle rotation pivot marker (Cmd/Ctrl+Shift+click to set)");
+
+                        // Reset pivot button (only enabled when pivot is not at center)
+                        let pivot_at_center = self.is_pivot_at_center();
+                        let reset_pivot_btn = egui::Button::new(
+                            egui::RichText::new("x").color(if pivot_at_center { 
+                                text_color.gamma_multiply(0.4) 
+                            } else { 
+                                text_color 
+                            })
+                        ).fill(Color32::TRANSPARENT);
+                        let reset_response = ui.add_sized(small_button_size, reset_pivot_btn);
+                        if !pivot_at_center && reset_response.clicked() {
+                            action = ZoomAction::ResetPivot;
+                        }
+                        reset_response.on_hover_text(if pivot_at_center {
+                            "Pivot is at image center"
+                        } else {
+                            "Reset pivot to image center"
+                        });
 
                         ui.separator();
 
@@ -1094,7 +1237,6 @@ impl ArrayViewerWidget {
             .anchor(egui::Align2::RIGHT_TOP, egui::vec2(-margin, margin))
             .show(ctx, |ui| {
                 let stretch_type = self.stretch_type();
-                let is_modified = self.is_stretch_modified();
                 let colormap = self.colormap();
                 let symmetric = self.is_symmetric();
                 let reversed = self.is_reversed();
@@ -1105,18 +1247,6 @@ impl ArrayViewerWidget {
 
                 ui.horizontal(|ui| {
                     ui.spacing_mut().item_spacing.x = 4.0;
-
-                    // Reset button on far left (only shown when modified) - same style as other buttons
-                    if is_modified {
-                        frame_style.show(ui, |ui| {
-                            let btn = egui::Button::new(
-                                egui::RichText::new("⟲").color(text_color)
-                            ).fill(Color32::TRANSPARENT);
-                            if ui.add(btn).on_hover_text("Reset contrast/bias").clicked() {
-                                action = StretchAction::ResetStretch;
-                            }
-                        });
-                    }
 
                     // Colormaps group with Rev toggle
                     frame_style.show(ui, |ui| {
@@ -1174,72 +1304,168 @@ impl ArrayViewerWidget {
         action
     }
 
-    /// Render colorbar overlay at top-left of widget
-    fn render_colorbar(&self, ctx: &egui::Context, widget_rect: egui::Rect) {
+    /// Render colorbar overlay at top-left of widget with editable limit values
+    fn render_colorbar(&mut self, ctx: &egui::Context, widget_rect: egui::Rect) {
         if !self.has_image() {
             return;
         }
 
-        let (scale_min, scale_max) = self.scaling_range();
-        let is_int = self.is_integer();
-
+        let is_int = self.is_integer;
         let bar_height = COLORBAR_MAX_HEIGHT.min(widget_rect.height() * 0.5);
-        let bar_width = COLORBAR_WIDTH;
-
-        // Translucent background for labels
-        let label_bg = egui::Color32::from_black_alpha(140);
-
-        egui::Area::new(egui::Id::new("colorbar"))
-            .fixed_pos(egui::pos2(widget_rect.min.x + COLORBAR_MARGIN, widget_rect.min.y + COLORBAR_MARGIN))
+        let bar_width = 16.0_f32;
+        let text_input_width = 70.0_f32;
+        let spacing = 4.0_f32;
+        let text_input_height = 20.0_f32;
+        
+        // Calculate positions
+        let bar_pos = egui::pos2(widget_rect.min.x + COLORBAR_MARGIN, widget_rect.min.y + COLORBAR_MARGIN);
+        let bar_rect = egui::Rect::from_min_size(bar_pos, egui::vec2(bar_width, bar_height));
+        
+        // Paint colorbar directly to the screen (no interaction, no Area)
+        if let Some(texture) = &self.colorbar_texture {
+            let painter = ctx.layer_painter(egui::LayerId::new(egui::Order::Middle, egui::Id::new("colorbar_paint")));
+            painter.rect_stroke(
+                bar_rect.expand(1.0),
+                0.0,
+                egui::Stroke::new(1.0, Color32::GRAY),
+                egui::StrokeKind::Outside,
+            );
+            painter.image(
+                texture.id(),
+                bar_rect,
+                egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
+                Color32::WHITE,
+            );
+        }
+        
+        // Max value text input - separate Area just for this widget
+        let max_input_pos = egui::pos2(bar_rect.max.x + spacing, bar_rect.min.y);
+        egui::Area::new(egui::Id::new("colorbar_max_input"))
+            .fixed_pos(max_input_pos)
+            .order(egui::Order::Middle)
             .show(ctx, |ui| {
-                ui.vertical(|ui| {
-                    let max_label = if is_int {
-                        format!("{}", scale_max as i64)
+                let text_color = get_overlay_text_color(ui);
+                let is_dark = ui.visuals().dark_mode;
+                
+                let edit_bg = if is_dark {
+                    egui::Color32::from_black_alpha(180)
+                } else {
+                    egui::Color32::from_white_alpha(220)
+                };
+                let edit_bg_hover = if is_dark {
+                    egui::Color32::from_black_alpha(200)
+                } else {
+                    egui::Color32::from_white_alpha(240)
+                };
+                let edit_bg_active = if is_dark {
+                    egui::Color32::from_black_alpha(220)
+                } else {
+                    egui::Color32::from_white_alpha(255)
+                };
+                ui.style_mut().visuals.extreme_bg_color = edit_bg;
+                ui.style_mut().visuals.widgets.inactive.bg_fill = edit_bg;
+                ui.style_mut().visuals.widgets.hovered.bg_fill = edit_bg_hover;
+                ui.style_mut().visuals.widgets.active.bg_fill = edit_bg_active;
+                
+                let max_edit = egui::TextEdit::singleline(&mut self.max_limit_input_text)
+                    .desired_width(text_input_width)
+                    .horizontal_align(egui::Align::Center)
+                    .text_color(text_color)
+                    .font(egui::FontId::proportional(13.0));
+                let max_response = ui.add(max_edit);
+                
+                if max_response.lost_focus() || (max_response.has_focus() && ui.input(|i| i.key_pressed(Key::Enter))) {
+                    if let Ok(new_val) = self.max_limit_input_text.trim().parse::<f64>() {
+                        if (self.max_val - new_val).abs() > 1e-15 {
+                            self.max_val = new_val;
+                            self.texture_dirty = true;
+                        }
                     } else {
-                        format_scientific(scale_max)
-                    };
-                    egui::Frame::NONE
-                        .fill(label_bg)
-                        .corner_radius(2.0)
-                        .inner_margin(egui::Margin::symmetric(4, 1))
-                        .show(ui, |ui| {
-                            ui.label(egui::RichText::new(&max_label).color(Color32::WHITE).small());
-                        });
-
-                    if let Some(texture) = &self.colorbar_texture {
-                        let bar_rect = egui::Rect::from_min_size(
-                            ui.cursor().min,
-                            egui::vec2(bar_width, bar_height),
-                        );
-                        ui.allocate_space(egui::vec2(bar_width, bar_height));
-
-                        let painter = ui.painter();
-                        painter.rect_stroke(
-                            bar_rect.expand(1.0),
-                            0.0,
-                            egui::Stroke::new(1.0, Color32::GRAY),
-                            egui::StrokeKind::Outside,
-                        );
-                        painter.image(
-                            texture.id(),
-                            bar_rect,
-                            egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
-                            Color32::WHITE,
-                        );
+                        self.max_limit_input_text = if is_int {
+                            format!("{}", self.max_val as i64)
+                        } else {
+                            format_scientific(self.max_val)
+                        };
                     }
-
-                    let min_label = if is_int {
-                        format!("{}", scale_min as i64)
+                }
+                max_response.on_hover_text("Maximum display value");
+            });
+        
+        // Min value text input - separate Area just for this widget
+        let min_input_pos = egui::pos2(bar_rect.max.x + spacing, bar_rect.max.y - text_input_height);
+        egui::Area::new(egui::Id::new("colorbar_min_input"))
+            .fixed_pos(min_input_pos)
+            .order(egui::Order::Middle)
+            .show(ctx, |ui| {
+                let text_color = get_overlay_text_color(ui);
+                let is_dark = ui.visuals().dark_mode;
+                
+                let edit_bg = if is_dark {
+                    egui::Color32::from_black_alpha(180)
+                } else {
+                    egui::Color32::from_white_alpha(220)
+                };
+                let edit_bg_hover = if is_dark {
+                    egui::Color32::from_black_alpha(200)
+                } else {
+                    egui::Color32::from_white_alpha(240)
+                };
+                let edit_bg_active = if is_dark {
+                    egui::Color32::from_black_alpha(220)
+                } else {
+                    egui::Color32::from_white_alpha(255)
+                };
+                ui.style_mut().visuals.extreme_bg_color = edit_bg;
+                ui.style_mut().visuals.widgets.inactive.bg_fill = edit_bg;
+                ui.style_mut().visuals.widgets.hovered.bg_fill = edit_bg_hover;
+                ui.style_mut().visuals.widgets.active.bg_fill = edit_bg_active;
+                
+                let min_edit = egui::TextEdit::singleline(&mut self.min_limit_input_text)
+                    .desired_width(text_input_width)
+                    .horizontal_align(egui::Align::Center)
+                    .text_color(text_color)
+                    .font(egui::FontId::proportional(13.0));
+                let min_response = ui.add(min_edit);
+                
+                if min_response.lost_focus() || (min_response.has_focus() && ui.input(|i| i.key_pressed(Key::Enter))) {
+                    if let Ok(new_val) = self.min_limit_input_text.trim().parse::<f64>() {
+                        if (self.min_val - new_val).abs() > 1e-15 {
+                            self.min_val = new_val;
+                            self.texture_dirty = true;
+                        }
                     } else {
-                        format_scientific(scale_min)
-                    };
-                    egui::Frame::NONE
-                        .fill(label_bg)
-                        .corner_radius(2.0)
-                        .inner_margin(egui::Margin::symmetric(4, 1))
-                        .show(ui, |ui| {
-                            ui.label(egui::RichText::new(&min_label).color(Color32::WHITE).small());
-                        });
+                        self.min_limit_input_text = if is_int {
+                            format!("{}", self.min_val as i64)
+                        } else {
+                            format_scientific(self.min_val)
+                        };
+                    }
+                }
+                min_response.on_hover_text("Minimum display value");
+            });
+        
+        // Reset button below the colorbar
+        let reset_button_pos = egui::pos2(bar_rect.min.x, bar_rect.max.y + spacing);
+        egui::Area::new(egui::Id::new("colorbar_reset_button"))
+            .fixed_pos(reset_button_pos)
+            .order(egui::Order::Middle)
+            .show(ctx, |ui| {
+                let text_color = get_overlay_text_color(ui);
+                let is_modified = self.is_display_modified();
+                let frame_style = overlay_frame(ui);
+                
+                frame_style.show(ui, |ui| {
+                    let btn_text = egui::RichText::new("Reset")
+                        .color(if is_modified { text_color } else { text_color.gamma_multiply(0.4) })
+                        .size(11.0);
+                    let btn = egui::Button::new(btn_text)
+                        .fill(Color32::TRANSPARENT)
+                        .min_size(egui::vec2(bar_width, 0.0));
+                    let response = ui.add_enabled(is_modified, btn);
+                    if response.clicked() {
+                        self.reset_display();
+                    }
+                    response.on_hover_text("Reset contrast/bias and limits");
                 });
             });
     }
