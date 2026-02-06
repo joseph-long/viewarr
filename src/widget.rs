@@ -165,6 +165,8 @@ pub struct ArrayViewerWidget {
     zoom_changed_time: Option<f64>,
     /// Previous zoom level to detect changes
     prev_zoom_level: f32,
+    /// Whether to show build info overlay (debug)
+    show_build_info: bool,
 }
 
 impl Default for ArrayViewerWidget {
@@ -206,6 +208,7 @@ impl ArrayViewerWidget {
             stretch_drag_active: false,
             zoom_changed_time: None,
             prev_zoom_level: 1.0,
+            show_build_info: false,
         }
     }
 
@@ -1061,6 +1064,10 @@ impl ArrayViewerWidget {
             if i.key_pressed(Key::Num0) {
                 self.zoom_to_fit();
             }
+            // Debug toggle
+            if i.key_pressed(Key::Questionmark) {
+                self.show_build_info = !self.show_build_info;
+            }
         });
     }
 
@@ -1313,6 +1320,8 @@ impl ArrayViewerWidget {
         let is_int = self.is_integer;
         let bar_height = COLORBAR_MAX_HEIGHT.min(widget_rect.height() * 0.5);
         let bar_width = 16.0_f32;
+        let bar_stroke_width = 1.0_f32;
+        let bar_stroke_offset = 1.0_f32;
         let text_input_width = 70.0_f32;
         let spacing = 4.0_f32;
         let text_input_height = 20.0_f32;
@@ -1325,9 +1334,9 @@ impl ArrayViewerWidget {
         if let Some(texture) = &self.colorbar_texture {
             let painter = ctx.layer_painter(egui::LayerId::new(egui::Order::Middle, egui::Id::new("colorbar_paint")));
             painter.rect_stroke(
-                bar_rect.expand(1.0),
+                bar_rect.expand(bar_stroke_offset),
                 0.0,
-                egui::Stroke::new(1.0, Color32::GRAY),
+                egui::Stroke::new(bar_stroke_width, Color32::GRAY),
                 egui::StrokeKind::Outside,
             );
             painter.image(
@@ -1444,29 +1453,30 @@ impl ArrayViewerWidget {
                 min_response.on_hover_text("Minimum display value");
             });
         
-        // Reset button below the colorbar
+        // Reset button below the colorbar - compact with theme background
         let reset_button_pos = egui::pos2(bar_rect.min.x, bar_rect.max.y + spacing);
         egui::Area::new(egui::Id::new("colorbar_reset_button"))
             .fixed_pos(reset_button_pos)
             .order(egui::Order::Middle)
             .show(ctx, |ui| {
                 let text_color = get_overlay_text_color(ui);
+                let bg_color = get_overlay_bg(ui);
                 let is_modified = self.is_display_modified();
-                let frame_style = overlay_frame(ui);
                 
-                frame_style.show(ui, |ui| {
-                    let btn_text = egui::RichText::new("Reset")
-                        .color(if is_modified { text_color } else { text_color.gamma_multiply(0.4) })
-                        .size(11.0);
-                    let btn = egui::Button::new(btn_text)
-                        .fill(Color32::TRANSPARENT)
-                        .min_size(egui::vec2(bar_width, 0.0));
-                    let response = ui.add_enabled(is_modified, btn);
-                    if response.clicked() {
-                        self.reset_display();
-                    }
-                    response.on_hover_text("Reset contrast/bias and limits");
-                });
+                // Minimal styling with no padding to keep width tight
+                ui.style_mut().spacing.button_padding = egui::vec2(bar_stroke_offset + bar_stroke_width, bar_stroke_offset + bar_stroke_width);
+                
+                let btn_icon = egui::RichText::new("⟲")
+                    .color(if is_modified { text_color } else { text_color.gamma_multiply(0.4) })
+                    .size(12.0);
+                let btn = egui::Button::new(btn_icon)
+                    .fill(bg_color)
+                    .min_size(egui::vec2(bar_width , bar_width));
+                let response = ui.add_enabled(is_modified, btn);
+                if response.clicked() {
+                    self.reset_display();
+                }
+                response.on_hover_text("Reset contrast/bias and limits");
             });
     }
 
@@ -1539,18 +1549,32 @@ impl ArrayViewerWidget {
             });
     }
 
-    /// Render build info at bottom-left of widget
+    /// Render build info at bottom-center of widget (debug toggle)
     fn render_build_info(&self, ctx: &egui::Context, widget_rect: egui::Rect) {
+        if !self.show_build_info {
+            return;
+        }
+
         let margin = 10.0;
 
         egui::Area::new(egui::Id::new("build_info"))
-            .fixed_pos(egui::pos2(widget_rect.min.x + margin, widget_rect.max.y - margin - 20.0))
+            .anchor(egui::Align2::CENTER_BOTTOM, egui::vec2(0.0, -margin))
             .show(ctx, |ui| {
-                ui.label(
-                    egui::RichText::new(env!("BUILD_TIMESTAMP"))
-                        .color(egui::Color32::from_white_alpha(80))
-                        .small(),
-                );
+                let text_color = get_overlay_text_color(ui);
+                let bg = get_overlay_bg(ui);
+                egui::Frame::popup(ui.style())
+                    .fill(bg)
+                    .corner_radius(6.0)
+                    .inner_margin(egui::Margin::symmetric(10, 4))
+                    .show(ui, |ui| {
+                        ui.horizontal_centered(|ui| {
+                            ui.label(
+                                egui::RichText::new(env!("BUILD_TIMESTAMP"))
+                                    .color(text_color)
+                                    .size(12.0),
+                            );
+                        });
+                    });
             });
     }
 
