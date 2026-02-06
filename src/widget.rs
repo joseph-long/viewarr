@@ -5,6 +5,7 @@
 //! can be used side-by-side without sharing state.
 
 use egui::{Color32, ColorImage, Key, PointerButton, Response, TextureHandle, TextureOptions, Ui, Vec2};
+use egui_phosphor::regular as phosphor;
 
 use crate::colormap::Colormap;
 use crate::transform::{self, ViewTransform};
@@ -35,6 +36,7 @@ enum ZoomAction {
     ZoomIn,
     ZoomOut,
     Reset,
+    ResetRotation,
     RotateBy(f32),        // Rotate by delta degrees
     TogglePivotMarker,    // Toggle pivot marker visibility
     ResetPivot,           // Reset pivot to image center
@@ -996,6 +998,15 @@ impl ArrayViewerWidget {
             ZoomAction::ZoomIn => self.zoom_in(None, viewport_center),
             ZoomAction::ZoomOut => self.zoom_out(None, viewport_center),
             ZoomAction::Reset => self.zoom_to_fit(),
+            ZoomAction::ResetRotation => {
+                let current = self.transform.rotation();
+                if current.abs() > 0.001 {
+                    self.transform.set_rotation(0.0);
+                    if !self.rotation_input_focused {
+                        self.rotation_input_text = "0.0".to_string();
+                    }
+                }
+            }
             ZoomAction::RotateBy(delta) => {
                 self.transform.rotate_by(delta);
                 // Only update text if user is not currently editing
@@ -1065,7 +1076,7 @@ impl ArrayViewerWidget {
                 self.zoom_to_fit();
             }
             // Debug toggle
-            if i.key_pressed(Key::Questionmark) {
+            if i.key_pressed(Key::F1) {
                 self.show_build_info = !self.show_build_info;
             }
         });
@@ -1099,24 +1110,26 @@ impl ArrayViewerWidget {
                         let can_reset = !self.is_default_view();
                         let reset_color = if can_reset { text_color } else { text_color.gamma_multiply(0.3) };
                         let reset_btn = egui::Button::new(
-                            egui::RichText::new("⟲").color(reset_color)
+                            egui::RichText::new(phosphor::ARROWS_OUT)
+                                .color(reset_color)
                         ).fill(Color32::TRANSPARENT);
                         let reset_response = ui.add_sized(button_size, reset_btn);
                         if can_reset && reset_response.clicked() {
                             action = ZoomAction::Reset;
                         }
+                        reset_response.on_hover_text("Reset zoom to fit");
 
                         let minus_btn = egui::Button::new(
-                            egui::RichText::new("−").color(text_color)
+                            egui::RichText::new(phosphor::MINUS).color(text_color)
                         ).fill(Color32::TRANSPARENT);
-                        if ui.add_sized(button_size, minus_btn).clicked() {
+                        if ui.add_sized(button_size, minus_btn).on_hover_text("Zoom out").clicked() {
                             action = ZoomAction::ZoomOut;
                         }
 
                         let plus_btn = egui::Button::new(
-                            egui::RichText::new("+").color(text_color)
+                            egui::RichText::new(phosphor::PLUS).color(text_color)
                         ).fill(Color32::TRANSPARENT);
-                        if ui.add_sized(button_size, plus_btn).clicked() {
+                        if ui.add_sized(button_size, plus_btn).on_hover_text("Zoom in").clicked() {
                             action = ZoomAction::ZoomIn;
                         }
                     });
@@ -1150,7 +1163,11 @@ impl ArrayViewerWidget {
                         ui.spacing_mut().item_spacing.x = spacing;
 
                         // Pivot marker toggle button (using ASCII symbols)
-                        let pivot_label = if self.transform.show_pivot_marker { "o" } else { "+" };
+                        let pivot_label = if self.transform.show_pivot_marker {
+                            phosphor::GPS_SLASH
+                        } else {
+                            phosphor::GPS
+                        };
                         let pivot_btn = egui::Button::new(
                             egui::RichText::new(pivot_label).color(text_color).size(16.0)
                         ).fill(Color32::TRANSPARENT);
@@ -1163,7 +1180,7 @@ impl ArrayViewerWidget {
                         // Reset pivot button (only enabled when pivot is not at center)
                         let pivot_at_center = self.is_pivot_at_center();
                         let reset_pivot_btn = egui::Button::new(
-                            egui::RichText::new("x").color(if pivot_at_center { 
+                            egui::RichText::new(phosphor::GPS_FIX).color(if pivot_at_center {
                                 text_color.gamma_multiply(0.4) 
                             } else { 
                                 text_color 
@@ -1179,11 +1196,30 @@ impl ArrayViewerWidget {
                             "Reset pivot to image center"
                         });
 
+                        // Reset rotation button (only enabled when rotation is nonzero)
+                        let rotation_zero = self.transform.rotation().abs() < 0.001;
+                        let reset_rotation_btn = egui::Button::new(
+                            egui::RichText::new(phosphor::VECTOR_TWO).color(if rotation_zero {
+                                text_color.gamma_multiply(0.4)
+                            } else {
+                                text_color
+                            })
+                        ).fill(Color32::TRANSPARENT);
+                        let reset_rotation_response = ui.add_sized(small_button_size, reset_rotation_btn);
+                        if !rotation_zero && reset_rotation_response.clicked() {
+                            action = ZoomAction::ResetRotation;
+                        }
+                        reset_rotation_response.on_hover_text(if rotation_zero {
+                            "Rotation is already zero"
+                        } else {
+                            "Reset rotation"
+                        });
+
                         ui.separator();
 
                         // Rotate CCW (minus) button
                         let ccw_btn = egui::Button::new(
-                            egui::RichText::new("↺").color(text_color)
+                            egui::RichText::new(phosphor::ARROW_COUNTER_CLOCKWISE).color(text_color)
                         ).fill(Color32::TRANSPARENT);
                         if ui.add_sized(small_button_size, ccw_btn).on_hover_text("Rotate 15° CCW").clicked() {
                             action = ZoomAction::RotateBy(transform::ROTATION_STEP);
@@ -1221,7 +1257,7 @@ impl ArrayViewerWidget {
 
                         // Rotate CW (plus) button
                         let cw_btn = egui::Button::new(
-                            egui::RichText::new("↻").color(text_color)
+                            egui::RichText::new(phosphor::ARROW_CLOCKWISE).color(text_color)
                         ).fill(Color32::TRANSPARENT);
                         if ui.add_sized(small_button_size, cw_btn).on_hover_text("Rotate 15° CW").clicked() {
                             action = ZoomAction::RotateBy(-transform::ROTATION_STEP);
@@ -1281,7 +1317,7 @@ impl ArrayViewerWidget {
                             ui.separator();
 
                             // Reverse toggle
-                            let rev_label = egui::RichText::new("Rev").color(text_color);
+                            let rev_label = egui::RichText::new(phosphor::ARROWS_DOWN_UP).color(text_color);
                             if ui.selectable_label(reversed, rev_label).on_hover_text("Reverse colormap").clicked() {
                                 action = StretchAction::ToggleReverse;
                             }
@@ -1292,11 +1328,11 @@ impl ArrayViewerWidget {
                     frame_style.show(ui, |ui| {
                         ui.horizontal(|ui| {
                             let lin_label = egui::RichText::new("Lin").color(text_color);
-                            if ui.selectable_label(stretch_type == StretchType::Linear && !symmetric, lin_label).clicked() {
+                            if ui.selectable_label(stretch_type == StretchType::Linear && !symmetric, lin_label).on_hover_text("Linear stretch").clicked() {
                                 action = StretchAction::SetLinear;
                             }
                             let log_label = egui::RichText::new("Log").color(text_color);
-                            if ui.selectable_label(stretch_type == StretchType::Log, log_label).clicked() {
+                            if ui.selectable_label(stretch_type == StretchType::Log, log_label).on_hover_text("Logarithmic stretch").clicked() {
                                 action = StretchAction::SetLog;
                             }
                             let div_label = egui::RichText::new("±").color(text_color);
@@ -1466,7 +1502,7 @@ impl ArrayViewerWidget {
                 // Minimal styling with no padding to keep width tight
                 ui.style_mut().spacing.button_padding = egui::vec2(bar_stroke_offset + bar_stroke_width, bar_stroke_offset + bar_stroke_width);
                 
-                let btn_icon = egui::RichText::new("⟲")
+                let btn_icon = egui::RichText::new(phosphor::ARROW_COUNTER_CLOCKWISE)
                     .color(if is_modified { text_color } else { text_color.gamma_multiply(0.4) })
                     .size(12.0);
                 let btn = egui::Button::new(btn_icon)

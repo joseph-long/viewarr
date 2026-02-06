@@ -17,6 +17,7 @@ use crate::ViewerCallbacks;
 use wasm_bindgen::JsValue;
 
 use eframe::WebLogger;
+use egui_phosphor as phosphor;
 
 /// Cached state for detecting changes
 #[derive(Clone, Default)]
@@ -111,12 +112,15 @@ impl ViewerApp {
     /// The widget is shared via Rc<RefCell<>> so that ViewerHandle can
     /// call methods on it from JavaScript.
     pub fn new(
-        _cc: &eframe::CreationContext<'_>,
+        cc: &eframe::CreationContext<'_>,
         widget: Rc<RefCell<ArrayViewerWidget>>,
         callbacks: Rc<RefCell<ViewerCallbacks>>,
     ) -> Self {
         // Initialize logging (adjust level as needed: Error, Warn, Info, Debug, Trace)
         WebLogger::init(log::LevelFilter::Trace).ok();
+        let mut fonts = egui::FontDefinitions::default();
+        phosphor::add_to_fonts(&mut fonts, phosphor::Variant::Regular);
+        cc.egui_ctx.set_fonts(fonts);
         Self {
             widget,
             callbacks,
