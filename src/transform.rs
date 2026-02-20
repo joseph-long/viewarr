@@ -173,9 +173,11 @@ impl ViewTransform {
         viewport_size: Vec2,
         base_image_rect: Rect,
     ) {
-        // Calculate where this image point would be in screen coords at current zoom
-        let rel_x = image_pos.x / image_size.x;
-        let rel_y = image_pos.y / image_size.y;
+        // Match image_to_screen[_rotated] conventions:
+        // - integer image coordinates are pixel centers (+0.5)
+        // - FITS Y axis is flipped (Y=0 at bottom)
+        let rel_x = (image_pos.x + 0.5) / image_size.x;
+        let rel_y = 1.0 - (image_pos.y + 0.5) / image_size.y;
 
         // Position within the zoomed image
         let zoomed_size = base_image_rect.size() * self.zoom;
@@ -550,6 +552,36 @@ mod tests {
         let outside = Pos2::new(50.0, 50.0);
         let result = t.screen_to_image(outside, image_rect, image_size);
         assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_center_on_image_point_places_selected_pixel_at_viewport_center() {
+        let mut t = ViewTransform::new();
+        let viewport_size = Vec2::new(800.0, 600.0);
+        let viewport_rect = Rect::from_min_size(Pos2::ZERO, viewport_size);
+        let image_size = (100, 100);
+        let base_size = Vec2::new(600.0, 600.0);
+        let base_image_rect = Rect::from_center_size(viewport_rect.center(), base_size);
+
+        let click_pos = Pos2::new(150.0, 120.0);
+        let image_rect_before = t.calculate_image_rect(viewport_rect, base_size);
+        let (img_x, img_y) = t
+            .screen_to_image_rotated(click_pos, image_rect_before, image_size)
+            .unwrap();
+
+        t.center_on_image_point(
+            Pos2::new(img_x as f32, img_y as f32),
+            Vec2::new(image_size.0 as f32, image_size.1 as f32),
+            viewport_size,
+            base_image_rect,
+        );
+
+        let image_rect_after = t.calculate_image_rect(viewport_rect, base_size);
+        let centered_pixel_pos = t.image_to_screen_rotated((img_x, img_y), image_rect_after, image_size);
+        let viewport_center = viewport_rect.center();
+
+        assert!((centered_pixel_pos.x - viewport_center.x).abs() < 0.01);
+        assert!((centered_pixel_pos.y - viewport_center.y).abs() < 0.01);
     }
 
     #[test]
