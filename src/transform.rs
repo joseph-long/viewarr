@@ -304,7 +304,9 @@ impl ViewTransform {
     /// Rotate a point around a center point
     /// angle_degrees: counter-clockwise rotation in degrees
     fn rotate_point(point: Pos2, center: Pos2, angle_degrees: f32) -> Pos2 {
-        let angle_rad = angle_degrees.to_radians();
+        // Screen coordinates have +Y downward; negate angle so positive degrees
+        // are still counter-clockwise in image/math convention.
+        let angle_rad = -angle_degrees.to_radians();
         let cos_a = angle_rad.cos();
         let sin_a = angle_rad.sin();
         
@@ -355,6 +357,34 @@ impl ViewTransform {
     }
 
     /// Convert screen position to image coordinates, accounting for rotation
+    /// Returns continuous image coordinates where integer values are pixel centers:
+    /// pixel (0, 0) spans [-0.5, 0.5) in both axes.
+    pub fn screen_to_image_continuous_rotated(
+        &self,
+        screen_pos: Pos2,
+        image_rect: Rect,
+        image_size: (u32, u32),
+    ) -> Option<(f32, f32)> {
+        // First, unrotate the screen position around the pivot
+        let pivot_screen = self.pivot_to_screen(image_rect, image_size);
+        let unrotated_pos = Self::unrotate_point(screen_pos, pivot_screen, self.rotation_degrees);
+
+        let rel_x = (unrotated_pos.x - image_rect.min.x) / image_rect.width();
+        let rel_y = 1.0 - (unrotated_pos.y - image_rect.min.y) / image_rect.height();
+
+        // Continuous coordinates with pixel-center convention.
+        let x = rel_x * image_size.0 as f32 - 0.5;
+        let y = rel_y * image_size.1 as f32 - 0.5;
+
+        if x >= -0.5 && x < image_size.0 as f32 - 0.5 && y >= -0.5 && y < image_size.1 as f32 - 0.5
+        {
+            Some((x, y))
+        } else {
+            None
+        }
+    }
+
+    /// Convert screen position to image coordinates, accounting for rotation
     /// Note: Y is flipped for FITS convention (Y=0 at bottom of displayed image)
     pub fn screen_to_image_rotated(
         &self,
@@ -362,25 +392,10 @@ impl ViewTransform {
         image_rect: Rect,
         image_size: (u32, u32),
     ) -> Option<(u32, u32)> {
-        // First, unrotate the screen position around the pivot
-        let pivot_screen = self.pivot_to_screen(image_rect, image_size);
-        let unrotated_pos = Self::unrotate_point(screen_pos, pivot_screen, self.rotation_degrees);
-        
-        // Now use standard conversion on the unrotated position
-        // (we don't check bounds on the original image_rect since rotation changes the visible area)
-        let rel_x = (unrotated_pos.x - image_rect.min.x) / image_rect.width();
-        let rel_y = 1.0 - (unrotated_pos.y - image_rect.min.y) / image_rect.height();
-
-        // Clamp to [0, 1) to handle boundary conditions
-        // Note: We don't clamp here since the point may be outside the rect due to rotation
-        let img_x = (rel_x * image_size.0 as f32).floor() as i32;
-        let img_y = (rel_y * image_size.1 as f32).floor() as i32;
-
-        if img_x >= 0 && img_x < image_size.0 as i32 && img_y >= 0 && img_y < image_size.1 as i32 {
-            Some((img_x as u32, img_y as u32))
-        } else {
-            None
-        }
+        let (x, y) = self.screen_to_image_continuous_rotated(screen_pos, image_rect, image_size)?;
+        let img_x = (x + 0.5).floor() as i32;
+        let img_y = (y + 0.5).floor() as i32;
+        Some((img_x as u32, img_y as u32))
     }
 
     /// Convert image coordinates to screen position, accounting for rotation

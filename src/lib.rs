@@ -156,9 +156,14 @@ impl ViewerHandle {
             "i8" | "u8" | "i16" | "u16" |
             "i32" | "u32" | "i64" | "u64"
         );
+        let value_decimals = match array_type {
+            "f32" => 4,
+            "f64" => 6,
+            _ => 0,
+        };
 
         let mut widget = self.widget.borrow_mut();
-        widget.set_image(pixels, width, height, is_integer);
+        widget.set_image(pixels, width, height, is_integer, value_decimals);
 
         Ok(())
     }

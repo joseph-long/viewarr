@@ -113,6 +113,8 @@ pub struct ArrayViewerWidget {
     original_max_val: f64,
     /// Whether the source data is integer-typed (for display formatting)
     is_integer: bool,
+    /// Decimal places for floating hover values (based on source dtype)
+    value_decimals: usize,
 
     // === View transformation ===
     /// Pan/zoom/rotation transformation state
@@ -151,12 +153,15 @@ pub struct ArrayViewerWidget {
     symmetric_mode: bool,
     /// Whether colormap is reversed
     colormap_reversed: bool,
+    /// Keep current display limits when loading new arrays.
+    colorbar_locked: bool,
 
     // === Rendering state ===
     /// Flag indicating texture needs rebuild
     texture_dirty: bool,
-    /// Cached hover information: (image_x, image_y, raw_value)
-    hover_info: Option<(u32, u32, f64)>,
+    /// Cached hover information: (image_x, image_y, raw_value), where x/y are
+    /// continuous coordinates and integer values are pixel centers.
+    hover_info: Option<(f64, f64, f64)>,
     /// Main image texture
     texture: Option<TextureHandle>,
     /// Colorbar texture
@@ -178,6 +183,53 @@ impl Default for ArrayViewerWidget {
 }
 
 impl ArrayViewerWidget {
+    /// Compute auto display limits from pixel data, ignoring NaNs/Infs.
+    fn auto_limits_from_pixels(pixels: &[f64]) -> (f64, f64) {
+        let mut min_val = f64::INFINITY;
+        let mut max_val = f64::NEG_INFINITY;
+
+        for &v in pixels {
+            if v.is_finite() {
+                if v < min_val {
+                    min_val = v;
+                }
+                if v > max_val {
+                    max_val = v;
+                }
+            }
+        }
+
+        if !min_val.is_finite() {
+            min_val = 0.0;
+        }
+        if !max_val.is_finite() {
+            max_val = 1.0;
+        }
+        if (max_val - min_val).abs() < f64::EPSILON {
+            max_val = min_val + 1.0;
+        }
+        (min_val, max_val)
+    }
+
+    fn apply_limits(&mut self, min_val: f64, max_val: f64, update_original: bool) {
+        self.min_val = min_val;
+        self.max_val = max_val;
+        if update_original {
+            self.original_min_val = min_val;
+            self.original_max_val = max_val;
+        }
+        self.min_limit_input_text = if self.is_integer {
+            format!("{}", self.min_val as i64)
+        } else {
+            format_scientific(self.min_val)
+        };
+        self.max_limit_input_text = if self.is_integer {
+            format!("{}", self.max_val as i64)
+        } else {
+            format_scientific(self.max_val)
+        };
+    }
+
     /// Create a new empty widget
     pub fn new() -> Self {
         Self {
@@ -189,6 +241,7 @@ impl ArrayViewerWidget {
             original_min_val: 0.0,
             original_max_val: 1.0,
             is_integer: false,
+            value_decimals: 6,
             transform: ViewTransform::new(),
             rotation_input_text: "0".to_string(),
             rotation_input_focused: false,
@@ -203,6 +256,7 @@ impl ArrayViewerWidget {
             diverging_colormap: Colormap::RdBu,
             symmetric_mode: false,
             colormap_reversed: false,
+            colorbar_locked: false,
             texture_dirty: false,
             hover_info: None,
             texture: None,
@@ -220,55 +274,28 @@ impl ArrayViewerWidget {
 
     /// Set new image data, computing min/max for auto-scaling.
     /// Pan is reset if dimensions change; zoom is always preserved.
-    pub fn set_image(&mut self, pixels: Vec<f64>, width: u32, height: u32, is_integer: bool) {
+    pub fn set_image(
+        &mut self,
+        pixels: Vec<f64>,
+        width: u32,
+        height: u32,
+        is_integer: bool,
+        value_decimals: usize,
+    ) {
         // Check if dimensions changed
         let dimensions_changed = width != self.width || height != self.height;
 
-        // Compute min/max, ignoring NaN values
-        let mut min_val = f64::INFINITY;
-        let mut max_val = f64::NEG_INFINITY;
-
-        for &v in &pixels {
-            if v.is_finite() {
-                if v < min_val {
-                    min_val = v;
-                }
-                if v > max_val {
-                    max_val = v;
-                }
-            }
-        }
-
-        // Handle edge cases
-        if !min_val.is_finite() {
-            min_val = 0.0;
-        }
-        if !max_val.is_finite() {
-            max_val = 1.0;
-        }
-        if (max_val - min_val).abs() < f64::EPSILON {
-            max_val = min_val + 1.0;
-        }
+        let (computed_min_val, computed_max_val) = Self::auto_limits_from_pixels(&pixels);
 
         self.pixels = Some(pixels);
         self.width = width;
         self.height = height;
-        self.min_val = min_val;
-        self.max_val = max_val;
-        self.original_min_val = min_val;
-        self.original_max_val = max_val;
-        self.min_limit_input_text = if is_integer {
-            format!("{}", min_val as i64)
-        } else {
-            format_scientific(min_val)
-        };
-        self.max_limit_input_text = if is_integer {
-            format!("{}", max_val as i64)
-        } else {
-            format_scientific(max_val)
-        };
+        if !self.colorbar_locked {
+            self.apply_limits(computed_min_val, computed_max_val, true);
+        }
         self.texture_dirty = true;
         self.is_integer = is_integer;
+        self.value_decimals = value_decimals;
 
         // Only reset pan if dimensions changed; always keep zoom
         if dimensions_changed {
@@ -502,25 +529,26 @@ impl ArrayViewerWidget {
 
     /// Reset limits to original auto-computed values
     pub fn reset_limits(&mut self) {
-        self.min_val = self.original_min_val;
-        self.max_val = self.original_max_val;
-        self.min_limit_input_text = if self.is_integer {
-            format!("{}", self.min_val as i64)
-        } else {
-            format_scientific(self.min_val)
-        };
-        self.max_limit_input_text = if self.is_integer {
-            format!("{}", self.max_val as i64)
-        } else {
-            format_scientific(self.max_val)
-        };
+        self.apply_limits(self.original_min_val, self.original_max_val, false);
         self.texture_dirty = true;
     }
 
-    /// Reset all display settings (stretch and limits)
+    /// Reset display settings.
+    /// If colorbar is locked, unlock and recompute limits from current image.
     pub fn reset_display(&mut self) {
         self.reset_current_stretch();
-        self.reset_limits();
+        if self.colorbar_locked {
+            self.colorbar_locked = false;
+            if let Some(pixels) = self.pixels.as_deref() {
+                let (min_val, max_val) = Self::auto_limits_from_pixels(pixels);
+                self.apply_limits(min_val, max_val, true);
+                self.texture_dirty = true;
+            } else {
+                self.reset_limits();
+            }
+        } else {
+            self.reset_limits();
+        }
     }
 
     /// Set whether user is currently adjusting stretch
@@ -573,6 +601,16 @@ impl ArrayViewerWidget {
     /// Check if colormap is reversed
     pub fn is_reversed(&self) -> bool {
         self.colormap_reversed
+    }
+
+    /// Check whether colorbar limits are locked across array changes.
+    pub fn is_colorbar_locked(&self) -> bool {
+        self.colorbar_locked
+    }
+
+    /// Toggle colorbar lock state.
+    pub fn toggle_colorbar_lock(&mut self) {
+        self.colorbar_locked = !self.colorbar_locked;
     }
 
     /// Toggle colormap reversal
@@ -641,7 +679,7 @@ impl ArrayViewerWidget {
     }
 
     /// Get current hover info
-    pub fn hover_info(&self) -> Option<(u32, u32, f64)> {
+    pub fn hover_info(&self) -> Option<(f64, f64, f64)> {
         self.hover_info
     }
 
@@ -817,7 +855,9 @@ impl ArrayViewerWidget {
             } else {
                 // With rotation - use mesh with rotated vertices
                 let pivot_screen = self.transform.pivot_to_screen(image_rect, (img_width, img_height));
-                let rotation_rad = self.transform.rotation().to_radians();
+                // Screen +Y points downward; negate so positive rotation stays CCW
+                // in image/math convention.
+                let rotation_rad = -self.transform.rotation().to_radians();
                 let cos_r = rotation_rad.cos();
                 let sin_r = rotation_rad.sin();
                 
@@ -856,8 +896,8 @@ impl ArrayViewerWidget {
                 painter.add(egui::Shape::mesh(mesh));
             }
             
-            // Draw pivot marker if enabled
-            if self.transform.show_pivot_marker {
+            // Draw pivot marker whenever the pivot is off-center, or while in pivot-placement mode.
+            if self.transform.show_pivot_marker || !self.is_pivot_at_center() {
                 let pivot_screen = self.transform.pivot_to_screen(image_rect, (img_width, img_height));
                 self.render_pivot_marker(&painter, pivot_screen);
             }
@@ -933,7 +973,8 @@ impl ArrayViewerWidget {
                         (img_width, img_height),
                     ) {
                         self.transform.set_pivot_point(img_x as f32, img_y as f32);
-                        self.transform.show_pivot_marker = true;
+                        // Pivot has been set; exit pivot-placement mode.
+                        self.transform.show_pivot_marker = false;
                     }
                 } else {
                     // Cmd/Ctrl+click: center view on point
@@ -955,13 +996,15 @@ impl ArrayViewerWidget {
 
         // Handle hover to show pixel value (using rotation-aware conversion)
         if let Some(hover_pos) = response.hover_pos() {
-            if let Some((img_x, img_y)) = self.transform.screen_to_image_rotated(
+            if let Some((img_x, img_y)) = self.transform.screen_to_image_continuous_rotated(
                 hover_pos,
                 image_rect,
                 (img_width, img_height),
             ) {
-                if let Some(value) = self.get_pixel_value(img_x, img_y) {
-                    self.hover_info = Some((img_x, img_y, value));
+                let px = (img_x + 0.5).floor() as u32;
+                let py = (img_y + 0.5).floor() as u32;
+                if let Some(value) = self.get_pixel_value(px, py) {
+                    self.hover_info = Some((img_x as f64, img_y as f64, value));
                 } else {
                     self.hover_info = None;
                 }
@@ -982,18 +1025,17 @@ impl ArrayViewerWidget {
 
         // Render overlays using Areas (they render at screen coordinates)
         // We collect actions from overlays and apply them after rendering
-        let zoom_action = self.render_zoom_controls(&ctx, viewport_center, rect);
-        let rotation_action = self.render_rotation_controls(&ctx, rect);
+        let control_action = self.render_zoom_controls(&ctx, viewport_center, rect);
         let stretch_action = self.render_stretch_controls(&ctx, rect);
         self.render_colorbar(&ctx, rect);
         self.render_stretch_info_overlay(&ctx, rect);
         self.render_zoom_info_overlay(&ctx, rect, current_time);
+        self.render_pivot_hint_overlay(&ctx, rect);
         self.render_hover_overlay(&ctx, rect);
         self.render_build_info(&ctx, rect);
 
-        // Apply collected actions (combine zoom and rotation actions)
-        let combined_zoom_action = if zoom_action != ZoomAction::None { zoom_action } else { rotation_action };
-        match combined_zoom_action {
+        // Apply collected actions from bottom controls
+        match control_action {
             ZoomAction::None => {}
             ZoomAction::ZoomIn => self.zoom_in(None, viewport_center),
             ZoomAction::ZoomOut => self.zoom_out(None, viewport_center),
@@ -1082,21 +1124,18 @@ impl ArrayViewerWidget {
         });
     }
 
-    /// Render zoom control buttons at bottom-right of widget.
+    /// Render bottom controls (rotation + zoom) as one container at bottom-right.
     /// Returns an action to be applied after rendering.
-    fn render_zoom_controls(&self, ctx: &egui::Context, _viewport_center: egui::Pos2, widget_rect: egui::Rect) -> ZoomAction {
+    fn render_zoom_controls(&mut self, ctx: &egui::Context, _viewport_center: egui::Pos2, widget_rect: egui::Rect) -> ZoomAction {
         let button_size = egui::vec2(28.0, 28.0);
+        let small_button_size = egui::vec2(24.0, 28.0);
         let margin = 10.0;
         let spacing = 4.0;
-
-        let num_buttons = 3.0;
-        let base_x = widget_rect.max.x - margin - button_size.x * num_buttons - spacing * (num_buttons - 1.0);
-        let base_y = widget_rect.max.y - margin - button_size.y;
 
         let mut action = ZoomAction::None;
 
         egui::Area::new(egui::Id::new("zoom_controls"))
-            .fixed_pos(egui::pos2(base_x, base_y))
+            .anchor(egui::Align2::RIGHT_BOTTOM, egui::vec2(-margin, -margin))
             .show(ctx, |ui| {
                 // Get themed colors
                 let frame_style = overlay_frame(ui);
@@ -1105,6 +1144,95 @@ impl ArrayViewerWidget {
                 frame_style.show(ui, |ui| {
                     ui.horizontal(|ui| {
                         ui.spacing_mut().item_spacing.x = spacing;
+
+                        // Rotation controls
+                        let pivot_label = if self.transform.show_pivot_marker {
+                            phosphor::GPS_SLASH
+                        } else {
+                            phosphor::GPS
+                        };
+                        let pivot_btn = egui::Button::new(
+                            egui::RichText::new(pivot_label).color(text_color).size(16.0)
+                        ).fill(Color32::TRANSPARENT);
+                        let pivot_response = ui.add_sized(button_size, pivot_btn);
+                        if pivot_response.clicked() {
+                            action = ZoomAction::TogglePivotMarker;
+                        }
+                        pivot_response.on_hover_text("Toggle rotation pivot marker (Cmd/Ctrl+Shift+click to set)");
+
+                        let pivot_at_center = self.is_pivot_at_center();
+                        let reset_pivot_btn = egui::Button::new(
+                            egui::RichText::new(phosphor::GPS_FIX).color(if pivot_at_center {
+                                text_color.gamma_multiply(0.4)
+                            } else {
+                                text_color
+                            })
+                        ).fill(Color32::TRANSPARENT);
+                        let reset_response = ui.add_sized(small_button_size, reset_pivot_btn);
+                        if !pivot_at_center && reset_response.clicked() {
+                            action = ZoomAction::ResetPivot;
+                        }
+                        reset_response.on_hover_text(if pivot_at_center {
+                            "Pivot is at image center"
+                        } else {
+                            "Reset pivot to image center"
+                        });
+
+                        let rotation_zero = self.transform.rotation().abs() < 0.001;
+                        let reset_rotation_btn = egui::Button::new(
+                            egui::RichText::new(phosphor::VECTOR_TWO).color(if rotation_zero {
+                                text_color.gamma_multiply(0.4)
+                            } else {
+                                text_color
+                            })
+                        ).fill(Color32::TRANSPARENT);
+                        let reset_rotation_response = ui.add_sized(small_button_size, reset_rotation_btn);
+                        if !rotation_zero && reset_rotation_response.clicked() {
+                            action = ZoomAction::ResetRotation;
+                        }
+                        reset_rotation_response.on_hover_text(if rotation_zero {
+                            "Rotation is already zero"
+                        } else {
+                            "Reset rotation"
+                        });
+
+                        let ccw_btn = egui::Button::new(
+                            egui::RichText::new(phosphor::ARROW_COUNTER_CLOCKWISE).color(text_color)
+                        ).fill(Color32::TRANSPARENT);
+                        if ui.add_sized(small_button_size, ccw_btn).on_hover_text("Rotate 15° CCW").clicked() {
+                            action = ZoomAction::RotateBy(transform::ROTATION_STEP);
+                        }
+
+                        let text_edit = egui::TextEdit::singleline(&mut self.rotation_input_text)
+                            .desired_width(50.0)
+                            .horizontal_align(egui::Align::Center)
+                            .font(egui::FontId::proportional(14.0));
+                        let response = ui.add(text_edit);
+
+                        if response.gained_focus() {
+                            self.rotation_input_focused = true;
+                        }
+                        if response.lost_focus() || (self.rotation_input_focused && ui.input(|i| i.key_pressed(Key::Enter))) {
+                            self.rotation_input_focused = false;
+                            if let Ok(degrees) = self.rotation_input_text.parse::<f32>() {
+                                let current = self.transform.rotation();
+                                if (degrees - current).abs() > 0.001 {
+                                    action = ZoomAction::RotateBy(degrees - current);
+                                }
+                            } else {
+                                self.rotation_input_text = format!("{:.1}", self.transform.rotation());
+                            }
+                        }
+                        response.on_hover_text("Rotation angle in degrees (CCW)");
+
+                        let cw_btn = egui::Button::new(
+                            egui::RichText::new(phosphor::ARROW_CLOCKWISE).color(text_color)
+                        ).fill(Color32::TRANSPARENT);
+                        if ui.add_sized(small_button_size, cw_btn).on_hover_text("Rotate 15° CW").clicked() {
+                            action = ZoomAction::RotateBy(-transform::ROTATION_STEP);
+                        }
+
+                        ui.separator();
 
                         // Always show reset button, but disable when at default view
                         let can_reset = !self.is_default_view();
@@ -1131,136 +1259,6 @@ impl ArrayViewerWidget {
                         ).fill(Color32::TRANSPARENT);
                         if ui.add_sized(button_size, plus_btn).on_hover_text("Zoom in").clicked() {
                             action = ZoomAction::ZoomIn;
-                        }
-                    });
-                });
-            });
-
-        action
-    }
-
-    /// Render rotation controls at bottom-left of widget.
-    /// Returns an action to be applied after rendering.
-    fn render_rotation_controls(&mut self, ctx: &egui::Context, widget_rect: egui::Rect) -> ZoomAction {
-        let button_size = egui::vec2(28.0, 28.0);
-        let small_button_size = egui::vec2(24.0, 28.0);
-        let margin = 10.0;
-        let spacing = 4.0;
-
-        let base_x = widget_rect.min.x + margin;
-        let base_y = widget_rect.max.y - margin - button_size.y;
-
-        let mut action = ZoomAction::None;
-
-        egui::Area::new(egui::Id::new("rotation_controls"))
-            .fixed_pos(egui::pos2(base_x, base_y))
-            .show(ctx, |ui| {
-                let frame_style = overlay_frame(ui);
-                let text_color = get_overlay_text_color(ui);
-
-                frame_style.show(ui, |ui| {
-                    ui.horizontal(|ui| {
-                        ui.spacing_mut().item_spacing.x = spacing;
-
-                        // Pivot marker toggle button (using ASCII symbols)
-                        let pivot_label = if self.transform.show_pivot_marker {
-                            phosphor::GPS_SLASH
-                        } else {
-                            phosphor::GPS
-                        };
-                        let pivot_btn = egui::Button::new(
-                            egui::RichText::new(pivot_label).color(text_color).size(16.0)
-                        ).fill(Color32::TRANSPARENT);
-                        let pivot_response = ui.add_sized(button_size, pivot_btn);
-                        if pivot_response.clicked() {
-                            action = ZoomAction::TogglePivotMarker;
-                        }
-                        pivot_response.on_hover_text("Toggle rotation pivot marker (Cmd/Ctrl+Shift+click to set)");
-
-                        // Reset pivot button (only enabled when pivot is not at center)
-                        let pivot_at_center = self.is_pivot_at_center();
-                        let reset_pivot_btn = egui::Button::new(
-                            egui::RichText::new(phosphor::GPS_FIX).color(if pivot_at_center {
-                                text_color.gamma_multiply(0.4) 
-                            } else { 
-                                text_color 
-                            })
-                        ).fill(Color32::TRANSPARENT);
-                        let reset_response = ui.add_sized(small_button_size, reset_pivot_btn);
-                        if !pivot_at_center && reset_response.clicked() {
-                            action = ZoomAction::ResetPivot;
-                        }
-                        reset_response.on_hover_text(if pivot_at_center {
-                            "Pivot is at image center"
-                        } else {
-                            "Reset pivot to image center"
-                        });
-
-                        // Reset rotation button (only enabled when rotation is nonzero)
-                        let rotation_zero = self.transform.rotation().abs() < 0.001;
-                        let reset_rotation_btn = egui::Button::new(
-                            egui::RichText::new(phosphor::VECTOR_TWO).color(if rotation_zero {
-                                text_color.gamma_multiply(0.4)
-                            } else {
-                                text_color
-                            })
-                        ).fill(Color32::TRANSPARENT);
-                        let reset_rotation_response = ui.add_sized(small_button_size, reset_rotation_btn);
-                        if !rotation_zero && reset_rotation_response.clicked() {
-                            action = ZoomAction::ResetRotation;
-                        }
-                        reset_rotation_response.on_hover_text(if rotation_zero {
-                            "Rotation is already zero"
-                        } else {
-                            "Reset rotation"
-                        });
-
-                        ui.separator();
-
-                        // Rotate CCW (minus) button
-                        let ccw_btn = egui::Button::new(
-                            egui::RichText::new(phosphor::ARROW_COUNTER_CLOCKWISE).color(text_color)
-                        ).fill(Color32::TRANSPARENT);
-                        if ui.add_sized(small_button_size, ccw_btn).on_hover_text("Rotate 15° CCW").clicked() {
-                            action = ZoomAction::RotateBy(transform::ROTATION_STEP);
-                        }
-
-                        // Rotation angle text input
-                        let text_edit_width = 50.0;
-                        let text_edit = egui::TextEdit::singleline(&mut self.rotation_input_text)
-                            .desired_width(text_edit_width)
-                            .horizontal_align(egui::Align::Center)
-                            .font(egui::FontId::proportional(14.0));
-                        let response = ui.add(text_edit);
-                        
-                        // Track focus state
-                        if response.gained_focus() {
-                            self.rotation_input_focused = true;
-                        }
-                        
-                        // Apply rotation when Enter is pressed or field loses focus
-                        if response.lost_focus() || (self.rotation_input_focused && ui.input(|i| i.key_pressed(Key::Enter))) {
-                            self.rotation_input_focused = false;
-                            // Parse and apply the rotation
-                            if let Ok(degrees) = self.rotation_input_text.parse::<f32>() {
-                                let current = self.transform.rotation();
-                                if (degrees - current).abs() > 0.001 {
-                                    // Calculate the delta to rotate by
-                                    action = ZoomAction::RotateBy(degrees - current);
-                                }
-                            } else {
-                                // Reset text to current value on parse error
-                                self.rotation_input_text = format!("{:.1}", self.transform.rotation());
-                            }
-                        }
-                        response.on_hover_text("Rotation angle in degrees (CCW)");
-
-                        // Rotate CW (plus) button
-                        let cw_btn = egui::Button::new(
-                            egui::RichText::new(phosphor::ARROW_CLOCKWISE).color(text_color)
-                        ).fill(Color32::TRANSPARENT);
-                        if ui.add_sized(small_button_size, cw_btn).on_hover_text("Rotate 15° CW").clicked() {
-                            action = ZoomAction::RotateBy(-transform::ROTATION_STEP);
                         }
                     });
                 });
@@ -1489,15 +1487,55 @@ impl ArrayViewerWidget {
                 min_response.on_hover_text("Minimum display value");
             });
         
-        // Reset button below the colorbar - compact with theme background
-        let reset_button_pos = egui::pos2(bar_rect.min.x, bar_rect.max.y + spacing);
+        // Lock button below the colorbar - compact with theme background
+        let lock_button_pos = egui::pos2(bar_rect.min.x, bar_rect.max.y + spacing);
+        egui::Area::new(egui::Id::new("colorbar_lock_button"))
+            .fixed_pos(lock_button_pos)
+            .order(egui::Order::Middle)
+            .show(ctx, |ui| {
+                let text_color = get_overlay_text_color(ui);
+                let bg_color = get_overlay_bg(ui);
+
+                ui.style_mut().spacing.button_padding =
+                    egui::vec2(bar_stroke_offset + bar_stroke_width, bar_stroke_offset + bar_stroke_width);
+
+                let is_locked = self.is_colorbar_locked();
+                let icon = if is_locked {
+                    phosphor::LOCK
+                } else {
+                    phosphor::LOCK_OPEN
+                };
+                let btn_icon = egui::RichText::new(icon).color(text_color).size(12.0);
+                let active_stroke = ui.visuals().widgets.active.bg_stroke;
+                let locked_stroke = egui::Stroke::new(active_stroke.width, active_stroke.color);
+                let btn = egui::Button::new(btn_icon)
+                    .fill(bg_color)
+                    .min_size(egui::vec2(bar_width, bar_width))
+                    .stroke(if is_locked {
+                        locked_stroke
+                    } else {
+                        egui::Stroke::NONE
+                    });
+                let response = ui.add(btn);
+                if response.clicked() {
+                    self.toggle_colorbar_lock();
+                }
+                response.on_hover_text(if is_locked {
+                    "Colorbar locked (new arrays keep current limits)"
+                } else {
+                    "Colorbar unlocked (new arrays auto-reset limits)"
+                });
+            });
+
+        // Reset button below lock button - compact with theme background
+        let reset_button_pos = egui::pos2(bar_rect.min.x, bar_rect.max.y + spacing + bar_width + spacing);
         egui::Area::new(egui::Id::new("colorbar_reset_button"))
             .fixed_pos(reset_button_pos)
             .order(egui::Order::Middle)
             .show(ctx, |ui| {
                 let text_color = get_overlay_text_color(ui);
                 let bg_color = get_overlay_bg(ui);
-                let is_modified = self.is_display_modified();
+                let is_modified = self.is_display_modified() || self.is_colorbar_locked();
                 
                 // Minimal styling with no padding to keep width tight
                 ui.style_mut().spacing.button_padding = egui::vec2(bar_stroke_offset + bar_stroke_width, bar_stroke_offset + bar_stroke_width);
@@ -1614,6 +1652,38 @@ impl ArrayViewerWidget {
             });
     }
 
+    /// Render hint for pivot-point placement mode.
+    fn render_pivot_hint_overlay(&self, ctx: &egui::Context, widget_rect: egui::Rect) {
+        if !self.transform.show_pivot_marker {
+            return;
+        }
+
+        let max_width = widget_rect.width() * 0.5;
+        let top_left = egui::pos2(
+            widget_rect.center().x - (max_width * 0.5),
+            widget_rect.bottom() - (widget_rect.height() / 6.0),
+        );
+        egui::Area::new(egui::Id::new("pivot_hint_overlay"))
+            .fixed_pos(top_left)
+            .interactable(false)
+            .show(ctx, |ui| {
+                let text_color = get_overlay_text_color(ui);
+                let frame_style = overlay_frame(ui);
+                frame_style.show(ui, |ui| {
+                    ui.set_max_width(max_width);
+                    ui.add_sized(
+                        [max_width, 0.0],
+                        egui::Label::new(
+                            egui::RichText::new("Ctrl/Cmd+Shift+click to set rotation pivot point")
+                                .color(text_color)
+                                .size(16.0),
+                        )
+                        .wrap(),
+                    );
+                });
+            });
+    }
+
     /// Render the rotation pivot marker at the given screen position
     fn render_pivot_marker(&self, painter: &egui::Painter, screen_pos: egui::Pos2) {
         let size = 12.0;
@@ -1640,24 +1710,91 @@ impl ArrayViewerWidget {
         painter.circle_stroke(screen_pos, size * 0.7, stroke);
     }
 
-    /// Render hover info overlay at bottom-left of widget
-    fn render_hover_overlay(&self, ctx: &egui::Context, widget_rect: egui::Rect) {
-        if let Some((x, y, value)) = self.hover_info() {
-            let is_int = self.is_integer();
+    /// Render compact hover info overlay at bottom-left with fixed-width fields.
+    fn render_hover_overlay(&self, ctx: &egui::Context, _widget_rect: egui::Rect) {
+        let margin = 10.0;
+        let value_chars = self.overlay_value_char_width();
+        let (x_value, y_value, z_value) = match self.hover_info() {
+            Some((x, y, value)) => {
+                let x_txt = format!("{:>width$.2}", x as f64, width = value_chars);
+                let y_txt = format!("{:>width$.2}", y as f64, width = value_chars);
+                let z_txt = format!("{:>width$}", self.format_hover_value(value), width = value_chars);
+                (x_txt, y_txt, z_txt)
+            }
+            None => (
+                format!("{:>width$}", "--.--", width = value_chars),
+                format!("{:>width$}", "--.--", width = value_chars),
+                format!("{:>width$}", "--", width = value_chars),
+            ),
+        };
 
-            egui::Area::new(egui::Id::new("hover_overlay"))
-                .fixed_pos(egui::pos2(widget_rect.min.x + 10.0, widget_rect.max.y - 30.0))
-                .show(ctx, |ui| {
-                    egui::Frame::popup(ui.style()).show(ui, |ui| {
-                        ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Extend);
-                        if is_int {
-                            ui.label(format!("Pixel ({}, {}): {}", x, y, value as i64));
-                        } else {
-                            ui.label(format!("Pixel ({}, {}): {:.6}", x, y, value));
-                        }
+        egui::Area::new(egui::Id::new("hover_overlay_compact"))
+            .anchor(egui::Align2::LEFT_BOTTOM, egui::vec2(margin, -margin))
+            .interactable(false)
+            .show(ctx, |ui| {
+                ui.style_mut().interaction.selectable_labels = false;
+                let frame_style = overlay_frame(ui);
+                let text_color = get_overlay_text_color(ui);
+                let label_width = 18.0;
+
+                frame_style.show(ui, |ui| {
+                    ui.vertical(|ui| {
+                        ui.spacing_mut().item_spacing.y = 2.0;
+                        let mut row = |label: &str, value: &str| {
+                            ui.horizontal(|ui| {
+                                ui.spacing_mut().item_spacing.x = 6.0;
+                                ui.add_sized(
+                                    [label_width, 18.0],
+                                    egui::Label::new(egui::RichText::new(label).monospace().color(text_color))
+                                        .selectable(false)
+                                        .sense(egui::Sense::hover()),
+                                );
+                                ui.add(
+                                    egui::Label::new(egui::RichText::new(value).monospace().color(text_color))
+                                        .selectable(false)
+                                        .sense(egui::Sense::hover()),
+                                );
+                            });
+                        };
+
+                        row("x:", &x_value);
+                        row("y:", &y_value);
+                        row("z:", &z_value);
                     });
                 });
+            });
+    }
+
+    fn format_hover_value(&self, value: f64) -> String {
+        if !value.is_finite() {
+            return value.to_string();
         }
+        if self.is_integer() {
+            format!("{}", value as i64)
+        } else {
+            let abs = value.abs();
+            if abs >= 100_000.0 || (value != 0.0 && abs < 0.00001) {
+                format!("{:.*e}", self.value_decimals, value)
+            } else {
+                format!("{:.*}", self.value_decimals, value)
+            }
+        }
+    }
+
+    /// Compute minimal stable width for hover value column (in characters),
+    /// based on image dimensions and the current value formatting mode/range.
+    fn overlay_value_char_width(&self) -> usize {
+        let max_x = self.width.saturating_sub(1) as f64;
+        let max_y = self.height.saturating_sub(1) as f64;
+        let x_chars = format!("{:.2}", max_x).len();
+        let y_chars = format!("{:.2}", max_y).len();
+
+        let v0 = self.format_hover_value(self.min_val).len();
+        let v1 = self.format_hover_value(self.max_val).len();
+        let v2 = self.format_hover_value(0.0).len();
+        let v_chars = v0.max(v1).max(v2).max(2); // "--" fallback
+
+        x_chars.max(y_chars).max(v_chars)
     }
 }
 
