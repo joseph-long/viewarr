@@ -33,7 +33,7 @@ export interface ViewerStateConfig {
   rotation?: number;
   pivot?: [number, number];
   showPivotMarker?: boolean;
-  shiftClickOverlayMessage?: string;
+  overlayMessage?: string;
 }
 
 /**
@@ -265,20 +265,20 @@ export function getShowPivotMarker(containerId: string): boolean;
 export function setShowPivotMarker(containerId: string, show: boolean): void;
 
 /**
- * Get the shift-click hint overlay message.
+ * Get the viewer overlay message.
  *
  * @param containerId - The ID of the container (viewer instance).
  * @returns Overlay message string.
  */
-export function getShiftClickOverlayMessage(containerId: string): string;
+export function getOverlayMessage(containerId: string): string;
 
 /**
- * Set the shift-click hint overlay message.
+ * Set the viewer overlay message.
  *
  * @param containerId - The ID of the container (viewer instance).
  * @param message - Overlay message (empty string hides the overlay).
  */
-export function setShiftClickOverlayMessage(containerId: string, message: string): void;
+export function setOverlayMessage(containerId: string, message: string): void;
 
 /**
  * Apply viewer state from a partial object.
@@ -331,7 +331,7 @@ export function onStateChange(
 ): void;
 
 /**
- * Register a callback to be called when the user clicks in the viewer.
+ * Register a callback to be called when the user shift-clicks in the viewer.
  *
  * The callback receives the click coordinates in data space.
  *
@@ -373,8 +373,8 @@ declare const viewarr: {
   setPivotPoint: typeof setPivotPoint;
   getShowPivotMarker: typeof getShowPivotMarker;
   setShowPivotMarker: typeof setShowPivotMarker;
-  getShiftClickOverlayMessage: typeof getShiftClickOverlayMessage;
-  setShiftClickOverlayMessage: typeof setShiftClickOverlayMessage;
+  getOverlayMessage: typeof getOverlayMessage;
+  setOverlayMessage: typeof setOverlayMessage;
   onStateChange: typeof onStateChange;
   onClick: typeof onClick;
   clearCallbacks: typeof clearCallbacks;

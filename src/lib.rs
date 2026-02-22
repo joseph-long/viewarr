@@ -257,18 +257,16 @@ impl ViewerHandle {
         self.widget.borrow_mut().set_show_pivot_marker(show);
     }
 
-    /// Get the shift-click overlay message shown at the bottom of the viewer.
-    #[wasm_bindgen(js_name = getShiftClickOverlayMessage)]
-    pub fn get_shift_click_overlay_message(&self) -> String {
-        self.widget.borrow().shift_click_overlay_message().to_string()
+    /// Get the overlay message shown at the bottom of the viewer.
+    #[wasm_bindgen(js_name = getOverlayMessage)]
+    pub fn get_overlay_message(&self) -> String {
+        self.widget.borrow().overlay_message().to_string()
     }
 
-    /// Set the shift-click overlay message shown at the bottom of the viewer.
-    #[wasm_bindgen(js_name = setShiftClickOverlayMessage)]
-    pub fn set_shift_click_overlay_message(&self, message: &str) {
-        self.widget
-            .borrow_mut()
-            .set_shift_click_overlay_message(message);
+    /// Set the overlay message shown at the bottom of the viewer.
+    #[wasm_bindgen(js_name = setOverlayMessage)]
+    pub fn set_overlay_message(&self, message: &str) {
+        self.widget.borrow_mut().set_overlay_message(message);
     }
 
     // =========================================================================

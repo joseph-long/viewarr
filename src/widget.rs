@@ -28,8 +28,6 @@ const COLORBAR_MAX_HEIGHT: f32 = 300.0;
 const COLORBAR_MARGIN: f32 = 10.0;
 /// Duration to show zoom level overlay after zooming
 const ZOOM_OVERLAY_DURATION: f64 = 0.5;
-/// Default hint shown for shift-click behavior.
-const DEFAULT_SHIFT_CLICK_OVERLAY: &str = "Shift-click to mark points";
 
 /// Actions returned from zoom controls overlay
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -176,8 +174,8 @@ pub struct ArrayViewerWidget {
     prev_zoom_level: f32,
     /// Whether to show build info overlay (debug)
     show_build_info: bool,
-    /// Hint text shown at the bottom of the viewer for shift-click behavior.
-    shift_click_overlay_message: String,
+    /// Optional overlay message shown at the bottom of the viewer.
+    overlay_message: String,
     /// Latest shift-click event in data coordinates, consumed by app callback code.
     pending_shift_click: Option<(f64, f64)>,
 }
@@ -271,7 +269,7 @@ impl ArrayViewerWidget {
             zoom_changed_time: None,
             prev_zoom_level: 1.0,
             show_build_info: false,
-            shift_click_overlay_message: DEFAULT_SHIFT_CLICK_OVERLAY.to_string(),
+            overlay_message: String::new(),
             pending_shift_click: None,
         }
     }
@@ -396,14 +394,14 @@ impl ArrayViewerWidget {
         self.transform.show_pivot_marker = show;
     }
 
-    /// Set the shift-click overlay text shown at bottom-center.
-    pub fn set_shift_click_overlay_message(&mut self, message: &str) {
-        self.shift_click_overlay_message = message.to_string();
+    /// Set the overlay text shown at bottom-center.
+    pub fn set_overlay_message(&mut self, message: &str) {
+        self.overlay_message = message.to_string();
     }
 
-    /// Get the current shift-click overlay text.
-    pub fn shift_click_overlay_message(&self) -> &str {
-        &self.shift_click_overlay_message
+    /// Get the current overlay text.
+    pub fn overlay_message(&self) -> &str {
+        &self.overlay_message
     }
 
     /// Consume and return the latest shift-click event (if any).
@@ -1086,7 +1084,7 @@ impl ArrayViewerWidget {
         self.render_zoom_info_overlay(&ctx, rect, current_time);
         self.render_pivot_hint_overlay(&ctx, rect);
         let hover_overlay_rect = self.render_hover_overlay(&ctx, rect);
-        self.render_shift_click_hint_overlay(&ctx, rect, hover_overlay_rect, zoom_controls_rect);
+        self.render_overlay_message(&ctx, rect, hover_overlay_rect, zoom_controls_rect);
         self.render_build_info(&ctx, rect);
 
         // Apply collected actions from bottom controls
@@ -1744,15 +1742,15 @@ impl ArrayViewerWidget {
             });
     }
 
-    /// Render shift-click hint at the bottom-center of the widget.
-    fn render_shift_click_hint_overlay(
+    /// Render overlay message at the bottom-center of the widget.
+    fn render_overlay_message(
         &self,
         ctx: &egui::Context,
         widget_rect: egui::Rect,
         hover_overlay_rect: egui::Rect,
         zoom_controls_rect: egui::Rect,
     ) {
-        if self.shift_click_overlay_message.is_empty() {
+        if self.overlay_message.is_empty() {
             return;
         }
 
@@ -1778,7 +1776,7 @@ impl ArrayViewerWidget {
                     ui.set_max_width(safe_width);
                     ui.add(
                         egui::Label::new(
-                            egui::RichText::new(self.shift_click_overlay_message.as_str())
+                            egui::RichText::new(self.overlay_message.as_str())
                                 .color(text_color)
                                 .size(14.0),
                         )

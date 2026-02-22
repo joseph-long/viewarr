@@ -29,7 +29,7 @@ const viewers = new Map();
  * @property {number=} rotation
  * @property {[number, number]=} pivot
  * @property {boolean=} showPivotMarker
- * @property {string=} shiftClickOverlayMessage
+ * @property {string=} overlayMessage
  */
 
 /**
@@ -605,33 +605,33 @@ export function setShowPivotMarker(containerId, show) {
 }
 
 /**
- * Get the shift-click hint overlay message.
+ * Get the viewer overlay message.
  *
  * @param {string} containerId - The ID of the container (viewer instance).
  * @returns {string} Overlay message.
  * @throws {Error} If the viewer is not found.
  */
-export function getShiftClickOverlayMessage(containerId) {
+export function getOverlayMessage(containerId) {
   const viewer = viewers.get(containerId);
   if (!viewer) {
     throw new Error(`No viewer found for container "${containerId}"`);
   }
-  return viewer.handle.getShiftClickOverlayMessage();
+  return viewer.handle.getOverlayMessage();
 }
 
 /**
- * Set the shift-click hint overlay message.
+ * Set the viewer overlay message.
  *
  * @param {string} containerId - The ID of the container (viewer instance).
  * @param {string} message - Overlay message (empty string hides the overlay).
  * @throws {Error} If the viewer is not found.
  */
-export function setShiftClickOverlayMessage(containerId, message) {
+export function setOverlayMessage(containerId, message) {
   const viewer = viewers.get(containerId);
   if (!viewer) {
     throw new Error(`No viewer found for container "${containerId}"`);
   }
-  viewer.handle.setShiftClickOverlayMessage(message);
+  viewer.handle.setOverlayMessage(message);
 }
 
 /**
@@ -704,8 +704,8 @@ export function setViewerState(containerId, state) {
   if ('showPivotMarker' in state && state.showPivotMarker !== undefined) {
     viewer.handle.setShowPivotMarker(state.showPivotMarker);
   }
-  if ('shiftClickOverlayMessage' in state && state.shiftClickOverlayMessage !== undefined) {
-    viewer.handle.setShiftClickOverlayMessage(state.shiftClickOverlayMessage);
+  if ('overlayMessage' in state && state.overlayMessage !== undefined) {
+    viewer.handle.setOverlayMessage(state.overlayMessage);
   }
   // Apply zoom last so explicit zoom takes precedence over bounds-derived zoom.
   if ('zoom' in state && state.zoom !== undefined) {
@@ -732,9 +732,9 @@ export function onStateChange(containerId, callback) {
 }
 
 /**
- * Register a callback to be called when the user clicks in the viewer.
+ * Register a callback to be called when the user shift-clicks in the viewer.
  *
- * The callback receives the click coordinates in data space: { x, y, value }
+ * The callback receives the click coordinates in data space: { x, y }
  *
  * @param {string} containerId - The ID of the container (viewer instance).
  * @param {Function} callback - Callback function to receive click events.
@@ -790,8 +790,8 @@ window.viewarr = {
   setPivotPoint,
   getShowPivotMarker,
   setShowPivotMarker,
-  getShiftClickOverlayMessage,
-  setShiftClickOverlayMessage,
+  getOverlayMessage,
+  setOverlayMessage,
   setViewerState,
   onStateChange,
   onClick,
@@ -827,8 +827,8 @@ export default {
   setPivotPoint,
   getShowPivotMarker,
   setShowPivotMarker,
-  getShiftClickOverlayMessage,
-  setShiftClickOverlayMessage,
+  getOverlayMessage,
+  setOverlayMessage,
   setViewerState,
   onStateChange,
   onClick,
