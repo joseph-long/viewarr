@@ -30,6 +30,7 @@ const viewers = new Map();
  * @property {[number, number]=} pivot
  * @property {boolean=} showPivotMarker
  * @property {string=} overlayMessage
+ * @property {[number, number][]=} markers
  */
 
 /**
@@ -635,6 +636,53 @@ export function setOverlayMessage(containerId, message) {
 }
 
 /**
+ * Get point markers from the viewer.
+ *
+ * @param {string} containerId - The ID of the container (viewer instance).
+ * @returns {[number, number][]} Marker points in image coordinates.
+ * @throws {Error} If the viewer is not found.
+ */
+export function getMarkers(containerId) {
+  const viewer = viewers.get(containerId);
+  if (!viewer) {
+    throw new Error(`No viewer found for container "${containerId}"`);
+  }
+  const flat = Array.from(viewer.handle.getMarkers());
+  const markers = [];
+  for (let i = 0; i + 1 < flat.length; i += 2) {
+    markers.push([flat[i], flat[i + 1]]);
+  }
+  return markers;
+}
+
+/**
+ * Set point markers in the viewer.
+ *
+ * @param {string} containerId - The ID of the container (viewer instance).
+ * @param {[number, number][]} markers - Marker points in image coordinates.
+ * @throws {Error} If the viewer is not found.
+ */
+export function setMarkers(containerId, markers) {
+  const viewer = viewers.get(containerId);
+  if (!viewer) {
+    throw new Error(`No viewer found for container "${containerId}"`);
+  }
+  if (!Array.isArray(markers)) {
+    viewer.handle.setMarkers([]);
+    return;
+  }
+  const flat = [];
+  for (const point of markers) {
+    if (!Array.isArray(point) || point.length !== 2) continue;
+    const x = Number(point[0]);
+    const y = Number(point[1]);
+    if (!Number.isFinite(x) || !Number.isFinite(y)) continue;
+    flat.push(x, y);
+  }
+  viewer.handle.setMarkers(flat);
+}
+
+/**
  * Apply viewer state from a partial configuration object.
  *
  * Missing keys are ignored. Unknown keys are ignored.
@@ -706,6 +754,9 @@ export function setViewerState(containerId, state) {
   }
   if ('overlayMessage' in state && state.overlayMessage !== undefined) {
     viewer.handle.setOverlayMessage(state.overlayMessage);
+  }
+  if ('markers' in state && state.markers !== undefined) {
+    setMarkers(containerId, state.markers);
   }
   // Apply zoom last so explicit zoom takes precedence over bounds-derived zoom.
   if ('zoom' in state && state.zoom !== undefined) {
@@ -792,6 +843,8 @@ window.viewarr = {
   setShowPivotMarker,
   getOverlayMessage,
   setOverlayMessage,
+  getMarkers,
+  setMarkers,
   setViewerState,
   onStateChange,
   onClick,
@@ -829,6 +882,8 @@ export default {
   setShowPivotMarker,
   getOverlayMessage,
   setOverlayMessage,
+  getMarkers,
+  setMarkers,
   setViewerState,
   onStateChange,
   onClick,

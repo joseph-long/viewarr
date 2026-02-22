@@ -269,6 +269,42 @@ impl ViewerHandle {
         self.widget.borrow_mut().set_overlay_message(message);
     }
 
+    /// Get point markers as a flat [x0, y0, x1, y1, ...] float array.
+    #[wasm_bindgen(js_name = getMarkers)]
+    pub fn get_markers(&self) -> js_sys::Float32Array {
+        let widget = self.widget.borrow();
+        let markers = widget.markers();
+        let mut flat = Vec::with_capacity(markers.len() * 2);
+        for &(x, y) in markers {
+            flat.push(x);
+            flat.push(y);
+        }
+        let result = js_sys::Float32Array::new_with_length(flat.len() as u32);
+        result.copy_from(&flat);
+        result
+    }
+
+    /// Set point markers from a flat [x0, y0, x1, y1, ...] float array.
+    #[wasm_bindgen(js_name = setMarkers)]
+    pub fn set_markers(&self, flat_points: Vec<f32>) {
+        if flat_points.len() % 2 != 0 {
+            return;
+        }
+        let markers: Vec<(f32, f32)> = flat_points
+            .chunks_exact(2)
+            .filter_map(|xy| {
+                let x = xy[0];
+                let y = xy[1];
+                if x.is_finite() && y.is_finite() {
+                    Some((x, y))
+                } else {
+                    None
+                }
+            })
+            .collect();
+        self.widget.borrow_mut().set_markers(markers);
+    }
+
     // =========================================================================
     // Contrast/Bias/Stretch getters and setters
     // =========================================================================

@@ -401,14 +401,14 @@ impl ViewTransform {
     }
 
     /// Convert image coordinates to screen position, accounting for rotation
-    pub fn image_to_screen_rotated(
+    pub fn image_to_screen_continuous_rotated(
         &self,
-        image_pos: (u32, u32),
+        image_pos: (f32, f32),
         image_rect: Rect,
         image_size: (u32, u32),
     ) -> Pos2 {
-        let rel_x = (image_pos.0 as f32 + 0.5) / image_size.0 as f32;
-        let rel_y = 1.0 - (image_pos.1 as f32 + 0.5) / image_size.1 as f32;
+        let rel_x = (image_pos.0 + 0.5) / image_size.0 as f32;
+        let rel_y = 1.0 - (image_pos.1 + 0.5) / image_size.1 as f32;
 
         let unrotated_pos = Pos2::new(
             image_rect.min.x + rel_x * image_rect.width(),
@@ -418,6 +418,20 @@ impl ViewTransform {
         // Rotate around the pivot
         let pivot_screen = self.pivot_to_screen(image_rect, image_size);
         Self::rotate_point(unrotated_pos, pivot_screen, self.rotation_degrees)
+    }
+
+    /// Convert image coordinates to screen position, accounting for rotation
+    pub fn image_to_screen_rotated(
+        &self,
+        image_pos: (u32, u32),
+        image_rect: Rect,
+        image_size: (u32, u32),
+    ) -> Pos2 {
+        self.image_to_screen_continuous_rotated(
+            (image_pos.0 as f32, image_pos.1 as f32),
+            image_rect,
+            image_size,
+        )
     }
 }
 

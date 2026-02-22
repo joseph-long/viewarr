@@ -66,6 +66,38 @@ setImageData('my-container-id', buffer, width, height, dtype);
 destroyViewer('my-container-id');
 ```
 
+### Marker coordinates API
+
+Markers are specified in continuous image coordinates `(x, y)`:
+
+```javascript
+import { setMarkers, getMarkers } from 'viewarr';
+
+setMarkers('my-container-id', [
+  [10.5, 20.25],
+  [100.0, 42.0]
+]);
+
+const markers = getMarkers('my-container-id');
+```
+
+Markers are rendered as fixed-size plus signs in screen space and follow pan/zoom/rotation.
+
+### Shift-click callback API
+
+Use `onClick(...)` to receive continuous data-space coordinates from shift-click events:
+
+```javascript
+import { onClick } from 'viewarr';
+
+onClick('my-container-id', ({ x, y }) => {
+  console.log(`Shift-click at x=${x.toFixed(3)}, y=${y.toFixed(3)}`);
+});
+```
+
+In `pyviewarr`, there is a notebook demo that combines this callback with marker updates:
+`notebooks/shift_click_callback_demo.ipynb`.
+
 ### Container Requirements
 
 - The container element **must have an ID** - this ID is used to identify the viewer instance
@@ -93,6 +125,7 @@ This package is designed to be used as the image viewer backend for [jupyterlab-
 ### Since last release
 
 - Added shift-click event callbacks with continuous (fractional) data-space coordinates via `onClick(...)`.
+- Added marker coordinate APIs: `getMarkers(...)` and `setMarkers(...)`.
 - Added generic overlay text APIs: `getOverlayMessage(...)` and `setOverlayMessage(...)`.
 - Added `overlayMessage` support in `setViewerState(...)` for bulk config application.
 - Renamed overlay API from shift-click-specific names to generic names (`getOverlayMessage`/`setOverlayMessage`, `overlayMessage` in state config).

@@ -178,6 +178,8 @@ pub struct ArrayViewerWidget {
     overlay_message: String,
     /// Latest shift-click event in data coordinates, consumed by app callback code.
     pending_shift_click: Option<(f64, f64)>,
+    /// Marker positions in continuous image coordinates (x, y).
+    markers: Vec<(f32, f32)>,
 }
 
 impl Default for ArrayViewerWidget {
@@ -271,6 +273,7 @@ impl ArrayViewerWidget {
             show_build_info: false,
             overlay_message: String::new(),
             pending_shift_click: None,
+            markers: Vec::new(),
         }
     }
 
@@ -407,6 +410,16 @@ impl ArrayViewerWidget {
     /// Consume and return the latest shift-click event (if any).
     pub fn take_shift_click_event(&mut self) -> Option<(f64, f64)> {
         self.pending_shift_click.take()
+    }
+
+    /// Get the current marker list in continuous image coordinates.
+    pub fn markers(&self) -> &[(f32, f32)] {
+        &self.markers
+    }
+
+    /// Replace the marker list with points in continuous image coordinates.
+    pub fn set_markers(&mut self, markers: Vec<(f32, f32)>) {
+        self.markers = markers;
     }
 
     /// Check if pivot point is at the image center
@@ -940,6 +953,13 @@ impl ArrayViewerWidget {
                 let pivot_screen = self.transform.pivot_to_screen(image_rect, (img_width, img_height));
                 self.render_pivot_marker(&painter, pivot_screen);
             }
+
+            self.render_markers(
+                &painter,
+                image_rect,
+                (img_width, img_height),
+                ui.visuals().dark_mode,
+            );
         }
 
         // Handle mouse wheel zoom
@@ -1810,6 +1830,44 @@ impl ArrayViewerWidget {
         
         // Draw circle around crosshair
         painter.circle_stroke(screen_pos, size * 0.7, stroke);
+    }
+
+    /// Render point markers as fixed-size plus signs with contrasting outlines.
+    fn render_markers(
+        &self,
+        painter: &egui::Painter,
+        image_rect: egui::Rect,
+        image_size: (u32, u32),
+        dark_mode: bool,
+    ) {
+        if self.markers.is_empty() {
+            return;
+        }
+
+        let outline_color = if dark_mode {
+            egui::Color32::from_rgba_unmultiplied(0, 0, 0, 128)
+        } else {
+            egui::Color32::from_rgba_unmultiplied(255, 255, 255, 128)
+        };
+        let marker_color = egui::Color32::from_rgb(0, 255, 255);
+        let half_size = 6.0;
+        let outline = egui::Stroke::new(4.0, outline_color);
+        let fill = egui::Stroke::new(2.0, marker_color);
+
+        for &(x, y) in &self.markers {
+            let screen_pos = self
+                .transform
+                .image_to_screen_continuous_rotated((x, y), image_rect, image_size);
+            let h0 = egui::pos2(screen_pos.x - half_size, screen_pos.y);
+            let h1 = egui::pos2(screen_pos.x + half_size, screen_pos.y);
+            let v0 = egui::pos2(screen_pos.x, screen_pos.y - half_size);
+            let v1 = egui::pos2(screen_pos.x, screen_pos.y + half_size);
+
+            painter.line_segment([h0, h1], outline);
+            painter.line_segment([v0, v1], outline);
+            painter.line_segment([h0, h1], fill);
+            painter.line_segment([v0, v1], fill);
+        }
     }
 
     /// Render compact hover info overlay at bottom-left with fixed-width fields.

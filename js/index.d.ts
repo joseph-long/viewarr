@@ -34,6 +34,7 @@ export interface ViewerStateConfig {
   pivot?: [number, number];
   showPivotMarker?: boolean;
   overlayMessage?: string;
+  markers?: [number, number][];
 }
 
 /**
@@ -281,6 +282,22 @@ export function getOverlayMessage(containerId: string): string;
 export function setOverlayMessage(containerId: string, message: string): void;
 
 /**
+ * Get point markers from the viewer.
+ *
+ * @param containerId - The ID of the container (viewer instance).
+ * @returns Marker points in image coordinates.
+ */
+export function getMarkers(containerId: string): [number, number][];
+
+/**
+ * Set point markers in the viewer.
+ *
+ * @param containerId - The ID of the container (viewer instance).
+ * @param markers - Marker points in image coordinates.
+ */
+export function setMarkers(containerId: string, markers: [number, number][]): void;
+
+/**
  * Apply viewer state from a partial object.
  *
  * Missing keys are ignored.
@@ -375,6 +392,8 @@ declare const viewarr: {
   setShowPivotMarker: typeof setShowPivotMarker;
   getOverlayMessage: typeof getOverlayMessage;
   setOverlayMessage: typeof setOverlayMessage;
+  getMarkers: typeof getMarkers;
+  setMarkers: typeof setMarkers;
   onStateChange: typeof onStateChange;
   onClick: typeof onClick;
   clearCallbacks: typeof clearCallbacks;
