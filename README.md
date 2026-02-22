@@ -92,6 +92,11 @@ This package is designed to be used as the image viewer backend for [jupyterlab-
 
 ### Since last release
 
+- Added shift-click event callbacks with continuous (fractional) data-space coordinates via `onClick(...)`.
+- Added shift-click hint overlay text APIs: `getShiftClickOverlayMessage(...)` and `setShiftClickOverlayMessage(...)`.
+- Added `shiftClickOverlayMessage` support in `setViewerState(...)` for bulk config application.
+- Added a default bottom hint overlay: "Shift-click to mark points".
+- Updated hint overlay layout to compute safe positioning from live overlay bounds so it sits between the hover readout and zoom controls without overlap.
 - Fixed diverging/symmetric colorbar limit behavior: `vmax` is now the sole editable limit, coerced positive, while `vmin` is disabled and displayed as `-vmax` without mutating underlying `min_val`.
 - Fixed reported `vmin`/`vmax` values from state callbacks and `getValueRange()` to reflect effective display limits in diverging/symmetric mode.
 - Added bulk state application via `setViewerState(...)` in the JS API for applying partial viewer configuration in one call.

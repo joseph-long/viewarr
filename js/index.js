@@ -29,6 +29,7 @@ const viewers = new Map();
  * @property {number=} rotation
  * @property {[number, number]=} pivot
  * @property {boolean=} showPivotMarker
+ * @property {string=} shiftClickOverlayMessage
  */
 
 /**
@@ -604,6 +605,36 @@ export function setShowPivotMarker(containerId, show) {
 }
 
 /**
+ * Get the shift-click hint overlay message.
+ *
+ * @param {string} containerId - The ID of the container (viewer instance).
+ * @returns {string} Overlay message.
+ * @throws {Error} If the viewer is not found.
+ */
+export function getShiftClickOverlayMessage(containerId) {
+  const viewer = viewers.get(containerId);
+  if (!viewer) {
+    throw new Error(`No viewer found for container "${containerId}"`);
+  }
+  return viewer.handle.getShiftClickOverlayMessage();
+}
+
+/**
+ * Set the shift-click hint overlay message.
+ *
+ * @param {string} containerId - The ID of the container (viewer instance).
+ * @param {string} message - Overlay message (empty string hides the overlay).
+ * @throws {Error} If the viewer is not found.
+ */
+export function setShiftClickOverlayMessage(containerId, message) {
+  const viewer = viewers.get(containerId);
+  if (!viewer) {
+    throw new Error(`No viewer found for container "${containerId}"`);
+  }
+  viewer.handle.setShiftClickOverlayMessage(message);
+}
+
+/**
  * Apply viewer state from a partial configuration object.
  *
  * Missing keys are ignored. Unknown keys are ignored.
@@ -672,6 +703,9 @@ export function setViewerState(containerId, state) {
   }
   if ('showPivotMarker' in state && state.showPivotMarker !== undefined) {
     viewer.handle.setShowPivotMarker(state.showPivotMarker);
+  }
+  if ('shiftClickOverlayMessage' in state && state.shiftClickOverlayMessage !== undefined) {
+    viewer.handle.setShiftClickOverlayMessage(state.shiftClickOverlayMessage);
   }
   // Apply zoom last so explicit zoom takes precedence over bounds-derived zoom.
   if ('zoom' in state && state.zoom !== undefined) {
@@ -756,6 +790,8 @@ window.viewarr = {
   setPivotPoint,
   getShowPivotMarker,
   setShowPivotMarker,
+  getShiftClickOverlayMessage,
+  setShiftClickOverlayMessage,
   setViewerState,
   onStateChange,
   onClick,
@@ -791,6 +827,8 @@ export default {
   setPivotPoint,
   getShowPivotMarker,
   setShowPivotMarker,
+  getShiftClickOverlayMessage,
+  setShiftClickOverlayMessage,
   setViewerState,
   onStateChange,
   onClick,

@@ -28,6 +28,8 @@ const COLORBAR_MAX_HEIGHT: f32 = 300.0;
 const COLORBAR_MARGIN: f32 = 10.0;
 /// Duration to show zoom level overlay after zooming
 const ZOOM_OVERLAY_DURATION: f64 = 0.5;
+/// Default hint shown for shift-click behavior.
+const DEFAULT_SHIFT_CLICK_OVERLAY: &str = "Shift-click to mark points";
 
 /// Actions returned from zoom controls overlay
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -174,6 +176,10 @@ pub struct ArrayViewerWidget {
     prev_zoom_level: f32,
     /// Whether to show build info overlay (debug)
     show_build_info: bool,
+    /// Hint text shown at the bottom of the viewer for shift-click behavior.
+    shift_click_overlay_message: String,
+    /// Latest shift-click event in data coordinates, consumed by app callback code.
+    pending_shift_click: Option<(f64, f64)>,
 }
 
 impl Default for ArrayViewerWidget {
@@ -265,6 +271,8 @@ impl ArrayViewerWidget {
             zoom_changed_time: None,
             prev_zoom_level: 1.0,
             show_build_info: false,
+            shift_click_overlay_message: DEFAULT_SHIFT_CLICK_OVERLAY.to_string(),
+            pending_shift_click: None,
         }
     }
 
@@ -386,6 +394,21 @@ impl ArrayViewerWidget {
     /// Set whether pivot marker is shown
     pub fn set_show_pivot_marker(&mut self, show: bool) {
         self.transform.show_pivot_marker = show;
+    }
+
+    /// Set the shift-click overlay text shown at bottom-center.
+    pub fn set_shift_click_overlay_message(&mut self, message: &str) {
+        self.shift_click_overlay_message = message.to_string();
+    }
+
+    /// Get the current shift-click overlay text.
+    pub fn shift_click_overlay_message(&self) -> &str {
+        &self.shift_click_overlay_message
+    }
+
+    /// Consume and return the latest shift-click event (if any).
+    pub fn take_shift_click_event(&mut self) -> Option<(f64, f64)> {
+        self.pending_shift_click.take()
     }
 
     /// Check if pivot point is at the image center
@@ -976,10 +999,23 @@ impl ArrayViewerWidget {
         }
 
         // Handle modifier+click interactions:
+        // - Shift+click: emit callback in continuous data coordinates
         // - Cmd/Ctrl+click: center view on clicked point
         // - Cmd/Ctrl+Shift+click: set rotation pivot point
         let modifiers = ui.input(|i| i.modifiers);
         let has_cmd_or_ctrl = modifiers.command || modifiers.ctrl;
+
+        if response.clicked() && modifiers.shift && !has_cmd_or_ctrl {
+            if let Some(click_pos) = response.interact_pointer_pos() {
+                if let Some((img_x, img_y)) = self.transform.screen_to_image_continuous_rotated(
+                    click_pos,
+                    image_rect,
+                    (img_width, img_height),
+                ) {
+                    self.pending_shift_click = Some((img_x as f64, img_y as f64));
+                }
+            }
+        }
         
         if response.clicked() && has_cmd_or_ctrl {
             if let Some(click_pos) = response.interact_pointer_pos() {
@@ -1043,13 +1079,14 @@ impl ArrayViewerWidget {
 
         // Render overlays using Areas (they render at screen coordinates)
         // We collect actions from overlays and apply them after rendering
-        let control_action = self.render_zoom_controls(&ctx, viewport_center, rect);
+        let (control_action, zoom_controls_rect) = self.render_zoom_controls(&ctx, viewport_center, rect);
         let stretch_action = self.render_stretch_controls(&ctx, rect);
         self.render_colorbar(&ctx, rect);
         self.render_stretch_info_overlay(&ctx, rect);
         self.render_zoom_info_overlay(&ctx, rect, current_time);
         self.render_pivot_hint_overlay(&ctx, rect);
-        self.render_hover_overlay(&ctx, rect);
+        let hover_overlay_rect = self.render_hover_overlay(&ctx, rect);
+        self.render_shift_click_hint_overlay(&ctx, rect, hover_overlay_rect, zoom_controls_rect);
         self.render_build_info(&ctx, rect);
 
         // Apply collected actions from bottom controls
@@ -1144,7 +1181,7 @@ impl ArrayViewerWidget {
 
     /// Render bottom controls (rotation + zoom) as one container at bottom-right.
     /// Returns an action to be applied after rendering.
-    fn render_zoom_controls(&mut self, ctx: &egui::Context, _viewport_center: egui::Pos2, widget_rect: egui::Rect) -> ZoomAction {
+    fn render_zoom_controls(&mut self, ctx: &egui::Context, _viewport_center: egui::Pos2, _widget_rect: egui::Rect) -> (ZoomAction, egui::Rect) {
         let button_size = egui::vec2(28.0, 28.0);
         let small_button_size = egui::vec2(24.0, 28.0);
         let margin = 10.0;
@@ -1152,7 +1189,7 @@ impl ArrayViewerWidget {
 
         let mut action = ZoomAction::None;
 
-        egui::Area::new(egui::Id::new("zoom_controls"))
+        let area_response = egui::Area::new(egui::Id::new("zoom_controls"))
             .anchor(egui::Align2::RIGHT_BOTTOM, egui::vec2(-margin, -margin))
             .show(ctx, |ui| {
                 // Get themed colors
@@ -1282,7 +1319,7 @@ impl ArrayViewerWidget {
                 });
             });
 
-        action
+        (action, area_response.response.rect)
     }
 
     /// Render stretch controls at top-right of widget.
@@ -1707,6 +1744,50 @@ impl ArrayViewerWidget {
             });
     }
 
+    /// Render shift-click hint at the bottom-center of the widget.
+    fn render_shift_click_hint_overlay(
+        &self,
+        ctx: &egui::Context,
+        widget_rect: egui::Rect,
+        hover_overlay_rect: egui::Rect,
+        zoom_controls_rect: egui::Rect,
+    ) {
+        if self.shift_click_overlay_message.is_empty() {
+            return;
+        }
+
+        let margin = 10.0;
+        let safe_left = hover_overlay_rect.right() + margin;
+        let safe_right = zoom_controls_rect.left() - margin;
+        if safe_right <= safe_left + 40.0 {
+            return;
+        }
+        let safe_width = safe_right - safe_left;
+        let safe_center_x = (safe_left + safe_right) * 0.5;
+
+        egui::Area::new(egui::Id::new("shift_click_hint_overlay"))
+            .anchor(
+                egui::Align2::CENTER_BOTTOM,
+                egui::vec2(safe_center_x - widget_rect.center().x, -margin),
+            )
+            .interactable(false)
+            .show(ctx, |ui| {
+                let text_color = get_overlay_text_color(ui);
+                let frame_style = overlay_frame(ui);
+                frame_style.show(ui, |ui| {
+                    ui.set_max_width(safe_width);
+                    ui.add(
+                        egui::Label::new(
+                            egui::RichText::new(self.shift_click_overlay_message.as_str())
+                                .color(text_color)
+                                .size(14.0),
+                        )
+                        .wrap(),
+                    );
+                });
+            });
+    }
+
     /// Render the rotation pivot marker at the given screen position
     fn render_pivot_marker(&self, painter: &egui::Painter, screen_pos: egui::Pos2) {
         let size = 12.0;
@@ -1734,7 +1815,7 @@ impl ArrayViewerWidget {
     }
 
     /// Render compact hover info overlay at bottom-left with fixed-width fields.
-    fn render_hover_overlay(&self, ctx: &egui::Context, _widget_rect: egui::Rect) {
+    fn render_hover_overlay(&self, ctx: &egui::Context, _widget_rect: egui::Rect) -> egui::Rect {
         let margin = 10.0;
         let value_chars = self.overlay_value_char_width();
         let (x_value, y_value, z_value) = match self.hover_info() {
@@ -1751,7 +1832,7 @@ impl ArrayViewerWidget {
             ),
         };
 
-        egui::Area::new(egui::Id::new("hover_overlay_compact"))
+        let area_response = egui::Area::new(egui::Id::new("hover_overlay_compact"))
             .anchor(egui::Align2::LEFT_BOTTOM, egui::vec2(margin, -margin))
             .interactable(false)
             .show(ctx, |ui| {
@@ -1786,6 +1867,7 @@ impl ArrayViewerWidget {
                     });
                 });
             });
+        area_response.response.rect
     }
 
     fn format_hover_value(&self, value: f64) -> String {

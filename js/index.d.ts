@@ -33,6 +33,7 @@ export interface ViewerStateConfig {
   rotation?: number;
   pivot?: [number, number];
   showPivotMarker?: boolean;
+  shiftClickOverlayMessage?: string;
 }
 
 /**
@@ -264,6 +265,22 @@ export function getShowPivotMarker(containerId: string): boolean;
 export function setShowPivotMarker(containerId: string, show: boolean): void;
 
 /**
+ * Get the shift-click hint overlay message.
+ *
+ * @param containerId - The ID of the container (viewer instance).
+ * @returns Overlay message string.
+ */
+export function getShiftClickOverlayMessage(containerId: string): string;
+
+/**
+ * Set the shift-click hint overlay message.
+ *
+ * @param containerId - The ID of the container (viewer instance).
+ * @param message - Overlay message (empty string hides the overlay).
+ */
+export function setShiftClickOverlayMessage(containerId: string, message: string): void;
+
+/**
  * Apply viewer state from a partial object.
  *
  * Missing keys are ignored.
@@ -298,7 +315,6 @@ export interface ViewerState {
 export interface ClickEvent {
   x: number;
   y: number;
-  value?: number;
 }
 
 /**
@@ -357,6 +373,8 @@ declare const viewarr: {
   setPivotPoint: typeof setPivotPoint;
   getShowPivotMarker: typeof getShowPivotMarker;
   setShowPivotMarker: typeof setShowPivotMarker;
+  getShiftClickOverlayMessage: typeof getShiftClickOverlayMessage;
+  setShiftClickOverlayMessage: typeof setShiftClickOverlayMessage;
   onStateChange: typeof onStateChange;
   onClick: typeof onClick;
   clearCallbacks: typeof clearCallbacks;

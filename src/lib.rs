@@ -39,7 +39,7 @@ use widget::ArrayViewerWidget;
 pub struct ViewerCallbacks {
     /// Called when viewer state changes (contrast, bias, zoom, pan, etc.)
     pub on_state_change: Option<js_sys::Function>,
-    /// Called when the user clicks on the image (with image coordinates and value)
+    /// Called when the user shift-clicks on the image (continuous image coordinates)
     pub on_click: Option<js_sys::Function>,
 }
 
@@ -255,6 +255,20 @@ impl ViewerHandle {
     #[wasm_bindgen(js_name = setShowPivotMarker)]
     pub fn set_show_pivot_marker(&self, show: bool) {
         self.widget.borrow_mut().set_show_pivot_marker(show);
+    }
+
+    /// Get the shift-click overlay message shown at the bottom of the viewer.
+    #[wasm_bindgen(js_name = getShiftClickOverlayMessage)]
+    pub fn get_shift_click_overlay_message(&self) -> String {
+        self.widget.borrow().shift_click_overlay_message().to_string()
+    }
+
+    /// Set the shift-click overlay message shown at the bottom of the viewer.
+    #[wasm_bindgen(js_name = setShiftClickOverlayMessage)]
+    pub fn set_shift_click_overlay_message(&self, message: &str) {
+        self.widget
+            .borrow_mut()
+            .set_shift_click_overlay_message(message);
     }
 
     // =========================================================================
@@ -491,8 +505,8 @@ impl ViewerHandle {
         self.callbacks.borrow_mut().on_state_change = Some(callback);
     }
 
-    /// Register a callback to be called when the user clicks on the image.
-    /// The callback receives: { x, y, value } in image coordinates.
+    /// Register a callback to be called when the user shift-clicks on the image.
+    /// The callback receives: { x, y } in continuous image coordinates.
     #[wasm_bindgen(js_name = onClick)]
     pub fn on_click(&self, callback: js_sys::Function) {
         self.callbacks.borrow_mut().on_click = Some(callback);

@@ -223,6 +223,22 @@ impl ViewerApp {
             self.cached_state = current_state;
         }
     }
+
+    /// Call the click callback for any queued shift-click event.
+    fn check_and_notify_shift_click(&mut self) {
+        let click_event = self.widget.borrow_mut().take_shift_click_event();
+        let Some((x, y)) = click_event else {
+            return;
+        };
+
+        if let Some(ref callback) = self.callbacks.borrow().on_click {
+            let event = js_sys::Object::new();
+            js_sys::Reflect::set(&event, &"x".into(), &x.into()).ok();
+            js_sys::Reflect::set(&event, &"y".into(), &y.into()).ok();
+            let this = JsValue::NULL;
+            let _ = callback.call1(&this, &event);
+        }
+    }
 }
 
 impl eframe::App for ViewerApp {
@@ -241,6 +257,7 @@ impl eframe::App for ViewerApp {
 
         // Check for state changes and notify JavaScript
         self.check_and_notify_state_change();
+        self.check_and_notify_shift_click();
 
         // Request continuous repaints for smooth updates
         ctx.request_repaint();
