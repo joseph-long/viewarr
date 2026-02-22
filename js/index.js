@@ -11,6 +11,27 @@ let wasmInitPromise = null;
 const viewers = new Map();
 
 /**
+ * Partial viewer state object for bulk state updates.
+ *
+ * All keys are optional; missing keys are ignored.
+ *
+ * @typedef {Object} ViewerStateConfig
+ * @property {number=} contrast
+ * @property {number=} bias
+ * @property {"linear" | "log" | "symmetric"=} stretchMode
+ * @property {number=} zoom
+ * @property {string=} colormap
+ * @property {boolean=} colormapReversed
+ * @property {number=} vmin
+ * @property {number=} vmax
+ * @property {[number, number]=} xlim
+ * @property {[number, number]=} ylim
+ * @property {number=} rotation
+ * @property {[number, number]=} pivot
+ * @property {boolean=} showPivotMarker
+ */
+
+/**
  * Initialize the WASM module (called automatically, idempotent)
  * @returns {Promise<void>}
  */
@@ -232,6 +253,36 @@ export function getActiveViewers() {
   return Array.from(viewers.keys());
 }
 
+/**
+ * Get current zoom level for a viewer (1.0 = fit to view).
+ *
+ * @param {string} containerId - The ID of the container (viewer instance).
+ * @returns {number} Zoom level.
+ * @throws {Error} If the viewer is not found.
+ */
+export function getZoom(containerId) {
+  const viewer = viewers.get(containerId);
+  if (!viewer) {
+    throw new Error(`No viewer found for container "${containerId}"`);
+  }
+  return viewer.handle.getZoom();
+}
+
+/**
+ * Set zoom level for a viewer (1.0 = fit to view).
+ *
+ * @param {string} containerId - The ID of the container (viewer instance).
+ * @param {number} zoom - Zoom level.
+ * @throws {Error} If the viewer is not found.
+ */
+export function setZoom(containerId, zoom) {
+  const viewer = viewers.get(containerId);
+  if (!viewer) {
+    throw new Error(`No viewer found for container "${containerId}"`);
+  }
+  viewer.handle.setZoom(zoom);
+}
+
 // =========================================================================
 // Contrast/Bias/Stretch getters and setters
 // =========================================================================
@@ -368,7 +419,7 @@ export function setViewBounds(containerId, xmin, xmax, ymin, ymax) {
  * Get the colormap name for a viewer.
  *
  * @param {string} containerId - The ID of the container (viewer instance).
- * @returns {string} Colormap name (e.g., "Gray", "Inferno", "Magma", "RdBu").
+ * @returns {string} Colormap name (e.g., "gray", "inferno", "magma", "RdBu").
  * @throws {Error} If the viewer is not found.
  */
 export function getColormap(containerId) {
@@ -377,6 +428,21 @@ export function getColormap(containerId) {
     throw new Error(`No viewer found for container "${containerId}"`);
   }
   return viewer.handle.getColormap();
+}
+
+/**
+ * Set the colormap name for a viewer.
+ *
+ * @param {string} containerId - The ID of the container (viewer instance).
+ * @param {string} colormap - Colormap name (e.g., "gray", "inferno", "magma", "RdBu").
+ * @throws {Error} If the viewer is not found.
+ */
+export function setColormap(containerId, colormap) {
+  const viewer = viewers.get(containerId);
+  if (!viewer) {
+    throw new Error(`No viewer found for container "${containerId}"`);
+  }
+  viewer.handle.setColormap(colormap);
 }
 
 /**
@@ -392,6 +458,21 @@ export function getColormapReversed(containerId) {
     throw new Error(`No viewer found for container "${containerId}"`);
   }
   return viewer.handle.getColormapReversed();
+}
+
+/**
+ * Set whether the colormap is reversed.
+ *
+ * @param {string} containerId - The ID of the container (viewer instance).
+ * @param {boolean} reversed - True to use reversed colormap.
+ * @throws {Error} If the viewer is not found.
+ */
+export function setColormapReversed(containerId, reversed) {
+  const viewer = viewers.get(containerId);
+  if (!viewer) {
+    throw new Error(`No viewer found for container "${containerId}"`);
+  }
+  viewer.handle.setColormapReversed(reversed);
 }
 
 /**
@@ -523,6 +604,82 @@ export function setShowPivotMarker(containerId, show) {
 }
 
 /**
+ * Apply viewer state from a partial configuration object.
+ *
+ * Missing keys are ignored. Unknown keys are ignored.
+ *
+ * @param {string} containerId - The ID of the container (viewer instance).
+ * @param {ViewerStateConfig} state - Partial state to apply.
+ * @throws {Error} If the viewer is not found.
+ */
+export function setViewerState(containerId, state) {
+  const viewer = viewers.get(containerId);
+  if (!viewer) {
+    throw new Error(`No viewer found for container "${containerId}"`);
+  }
+  if (!state || typeof state !== 'object') {
+    return;
+  }
+
+  if ('contrast' in state && state.contrast !== undefined) {
+    viewer.handle.setContrast(state.contrast);
+  }
+  if ('bias' in state && state.bias !== undefined) {
+    viewer.handle.setBias(state.bias);
+  }
+  if ('stretchMode' in state && state.stretchMode !== undefined) {
+    viewer.handle.setStretchMode(state.stretchMode);
+  }
+  if ('colormap' in state && state.colormap !== undefined) {
+    viewer.handle.setColormap(state.colormap);
+  }
+  if ('colormapReversed' in state && state.colormapReversed !== undefined) {
+    viewer.handle.setColormapReversed(state.colormapReversed);
+  }
+  if ('vmin' in state && 'vmax' in state && state.vmin !== undefined && state.vmax !== undefined) {
+    viewer.handle.setValueRange(state.vmin, state.vmax);
+  }
+  if (
+    'xlim' in state &&
+    'ylim' in state &&
+    state.xlim !== undefined &&
+    state.ylim !== undefined &&
+    Array.isArray(state.xlim) &&
+    Array.isArray(state.ylim) &&
+    state.xlim.length === 2 &&
+    state.ylim.length === 2
+  ) {
+    const rect = viewer.container.getBoundingClientRect();
+    viewer.handle.setViewBounds(
+      state.xlim[0],
+      state.xlim[1],
+      state.ylim[0],
+      state.ylim[1],
+      rect.width,
+      rect.height
+    );
+  }
+  if ('rotation' in state && state.rotation !== undefined) {
+    viewer.handle.setRotation(state.rotation);
+  }
+  if (
+    'pivot' in state &&
+    state.pivot !== undefined &&
+    Array.isArray(state.pivot) &&
+    state.pivot.length === 2
+  ) {
+    viewer.handle.setPivotPoint(state.pivot[0], state.pivot[1]);
+  }
+  if ('showPivotMarker' in state && state.showPivotMarker !== undefined) {
+    viewer.handle.setShowPivotMarker(state.showPivotMarker);
+  }
+  // Apply zoom last so explicit zoom takes precedence over bounds-derived zoom.
+  if ('zoom' in state && state.zoom !== undefined) {
+    viewer.handle.setZoom(state.zoom);
+  }
+}
+
+/**
  * Register a callback to be called when the viewer state changes.
  *
  * The callback receives an object with the current state:
@@ -577,6 +734,8 @@ window.viewarr = {
   destroyViewer,
   hasViewer,
   getActiveViewers,
+  getZoom,
+  setZoom,
   getContrast,
   setContrast,
   getBias,
@@ -586,7 +745,9 @@ window.viewarr = {
   getViewBounds,
   setViewBounds,
   getColormap,
+  setColormap,
   getColormapReversed,
+  setColormapReversed,
   getValueRange,
   setValueRange,
   getRotation,
@@ -595,6 +756,7 @@ window.viewarr = {
   setPivotPoint,
   getShowPivotMarker,
   setShowPivotMarker,
+  setViewerState,
   onStateChange,
   onClick,
   clearCallbacks
@@ -607,6 +769,8 @@ export default {
   destroyViewer,
   hasViewer,
   getActiveViewers,
+  getZoom,
+  setZoom,
   getContrast,
   setContrast,
   getBias,
@@ -616,7 +780,9 @@ export default {
   getViewBounds,
   setViewBounds,
   getColormap,
+  setColormap,
   getColormapReversed,
+  setColormapReversed,
   getValueRange,
   setValueRange,
   getRotation,
@@ -625,6 +791,7 @@ export default {
   setPivotPoint,
   getShowPivotMarker,
   setShowPivotMarker,
+  setViewerState,
   onStateChange,
   onClick,
   clearCallbacks

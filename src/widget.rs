@@ -619,6 +619,14 @@ impl ArrayViewerWidget {
         self.texture_dirty = true;
     }
 
+    /// Set colormap reversal directly
+    pub fn set_reversed(&mut self, reversed: bool) {
+        if self.colormap_reversed != reversed {
+            self.colormap_reversed = reversed;
+            self.texture_dirty = true;
+        }
+    }
+
     // =========================================================================
     // Internal helpers
     // =========================================================================

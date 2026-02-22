@@ -17,6 +17,24 @@ export type ArrayType =
   | 'Float32Array'
   | 'Float64Array';
 
+export type StretchMode = 'linear' | 'log' | 'symmetric';
+
+export interface ViewerStateConfig {
+  contrast?: number;
+  bias?: number;
+  stretchMode?: StretchMode;
+  zoom?: number;
+  colormap?: string;
+  colormapReversed?: boolean;
+  vmin?: number;
+  vmax?: number;
+  xlim?: [number, number];
+  ylim?: [number, number];
+  rotation?: number;
+  pivot?: [number, number];
+  showPivotMarker?: boolean;
+}
+
 /**
  * Create a new viewer instance in the specified container.
  *
@@ -68,6 +86,22 @@ export function hasViewer(containerId: string): boolean;
 export function getActiveViewers(): string[];
 
 /**
+ * Get current zoom level for a viewer.
+ *
+ * @param containerId - The ID of the container (viewer instance).
+ * @returns Zoom level (1.0 means fit-to-view).
+ */
+export function getZoom(containerId: string): number;
+
+/**
+ * Set zoom level for a viewer.
+ *
+ * @param containerId - The ID of the container (viewer instance).
+ * @param zoom - Zoom level (1.0 means fit-to-view).
+ */
+export function setZoom(containerId: string, zoom: number): void;
+
+/**
  * Get current contrast value for a viewer.
  *
  * @param containerId - The ID of the container (viewer instance).
@@ -105,7 +139,7 @@ export function setBias(containerId: string, bias: number): void;
  * @param containerId - The ID of the container (viewer instance).
  * @returns Stretch mode: "linear", "log", or "symmetric".
  */
-export function getStretchMode(containerId: string): string;
+export function getStretchMode(containerId: string): StretchMode;
 
 /**
  * Set stretch mode for a viewer.
@@ -113,7 +147,7 @@ export function getStretchMode(containerId: string): string;
  * @param containerId - The ID of the container (viewer instance).
  * @param mode - Stretch mode: "linear", "log", or "symmetric".
  */
-export function setStretchMode(containerId: string, mode: string): void;
+export function setStretchMode(containerId: string, mode: StretchMode): void;
 
 /**
  * Get visible image bounds in pixel coordinates.
@@ -144,9 +178,17 @@ export function setViewBounds(
  * Get the colormap name for a viewer.
  *
  * @param containerId - The ID of the container (viewer instance).
- * @returns Colormap name (e.g., "Gray", "Inferno", "Magma", "RdBu").
+ * @returns Colormap name (e.g., "gray", "inferno", "magma", "RdBu").
  */
 export function getColormap(containerId: string): string;
+
+/**
+ * Set the colormap name for a viewer.
+ *
+ * @param containerId - The ID of the container (viewer instance).
+ * @param colormap - Colormap name (e.g., "gray", "inferno", "magma", "RdBu").
+ */
+export function setColormap(containerId: string, colormap: string): void;
 
 /**
  * Get whether the colormap is reversed.
@@ -155,6 +197,14 @@ export function getColormap(containerId: string): string;
  * @returns True if the colormap is reversed.
  */
 export function getColormapReversed(containerId: string): boolean;
+
+/**
+ * Set whether the colormap is reversed.
+ *
+ * @param containerId - The ID of the container (viewer instance).
+ * @param reversed - True if the colormap should be reversed.
+ */
+export function setColormapReversed(containerId: string, reversed: boolean): void;
 
 /**
  * Get the image value range (vmin, vmax).
@@ -214,12 +264,22 @@ export function getShowPivotMarker(containerId: string): boolean;
 export function setShowPivotMarker(containerId: string, show: boolean): void;
 
 /**
+ * Apply viewer state from a partial object.
+ *
+ * Missing keys are ignored.
+ *
+ * @param containerId - The ID of the container (viewer instance).
+ * @param state - Partial viewer state object.
+ */
+export function setViewerState(containerId: string, state: ViewerStateConfig): void;
+
+/**
  * State object passed to state change callbacks.
  */
 export interface ViewerState {
   contrast: number;
   bias: number;
-  stretchMode: string;
+  stretchMode: StretchMode;
   zoom: number;
   colormap: string;
   colormapReversed: boolean;

@@ -88,6 +88,17 @@ setImageData('viewer-2', buffer2, 200, 200, 'f64');
 
 This package is designed to be used as the image viewer backend for [jupyterlab-fitsview](https://github.com/joseph-long/jupyterlab-fitsview). It can also be embedded as a widget within a notebook using [pyviewarr](https://github.com/joseph-long/pyviewarr).
 
+## Changelog
+
+### Since last release
+
+- Added bulk state application via `setViewerState(...)` in the JS API for applying partial viewer configuration in one call.
+- Added explicit JS/TS APIs for zoom and colormap control: `getZoom`/`setZoom`, `setColormap`, and `setColormapReversed`.
+- Improved TypeScript typings with `StretchMode` and `ViewerStateConfig` to make state sync calls type-safe.
+- Added Rust-side colormap setters exposed to WASM bindings (`setColormap`, `setColormapReversed`).
+- Standardized colormap names and parsing (including common aliases like `grayscale`/`greyscale`) for more robust interop between Python/JS/Rust layers.
+- Added direct widget support for setting colormap reversal without cycling through toggle paths.
+
 ## License
 
 MIT

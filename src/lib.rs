@@ -29,6 +29,8 @@ mod widget;
 #[cfg(target_arch = "wasm32")]
 use app::ViewerApp;
 #[cfg(target_arch = "wasm32")]
+use colormap::Colormap;
+#[cfg(target_arch = "wasm32")]
 use widget::ArrayViewerWidget;
 
 /// Callbacks that can be registered from JavaScript
@@ -437,10 +439,28 @@ impl ViewerHandle {
         self.widget.borrow().colormap().name().to_string()
     }
 
+    /// Set the colormap by name.
+    ///
+    /// Accepted values include: Gray, Inferno, Magma, RdBu, RdYlBu.
+    /// Invalid names are ignored.
+    #[wasm_bindgen(js_name = setColormap)]
+    pub fn set_colormap(&self, name: &str) {
+        let Some(colormap) = Colormap::from_name(name) else {
+            return;
+        };
+        self.widget.borrow_mut().set_colormap(colormap);
+    }
+
     /// Get whether the colormap is reversed
     #[wasm_bindgen(js_name = getColormapReversed)]
     pub fn get_colormap_reversed(&self) -> bool {
         self.widget.borrow().is_reversed()
+    }
+
+    /// Set whether the colormap is reversed
+    #[wasm_bindgen(js_name = setColormapReversed)]
+    pub fn set_colormap_reversed(&self, reversed: bool) {
+        self.widget.borrow_mut().set_reversed(reversed);
     }
 
     /// Get the image value range (vmin, vmax) as [min, max]

@@ -21,12 +21,28 @@ pub enum Colormap {
 }
 
 impl Colormap {
+    /// Parse a colormap name from JavaScript/user input.
+    ///
+    /// Accepts canonical names used by the UI/state callbacks, with a few
+    /// common aliases.
+    pub fn from_name(name: &str) -> Option<Self> {
+        let normalized = name.trim().to_ascii_lowercase();
+        match normalized.as_str() {
+            "gray" | "grayscale" | "greyscale" => Some(Colormap::Grayscale),
+            "inferno" => Some(Colormap::Inferno),
+            "magma" => Some(Colormap::Magma),
+            "rdbu" => Some(Colormap::RdBu),
+            "rdylbu" => Some(Colormap::RdYlBu),
+            _ => None,
+        }
+    }
+
     /// Get display name for UI
     pub fn name(&self) -> &'static str {
         match self {
-            Colormap::Grayscale => "Gray",
-            Colormap::Inferno => "Inferno",
-            Colormap::Magma => "Magma",
+            Colormap::Grayscale => "gray",
+            Colormap::Inferno => "inferno",
+            Colormap::Magma => "magma",
             Colormap::RdBu => "RdBu",
             Colormap::RdYlBu => "RdYlBu",
         }
