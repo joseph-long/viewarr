@@ -623,6 +623,17 @@ impl ArrayViewerWidget {
     pub fn set_symmetric(&mut self, enabled: bool) {
         if self.symmetric_mode != enabled {
             self.symmetric_mode = enabled;
+            if enabled {
+                self.max_limit_input_text =
+                    Self::format_limit_value(self.max_val.abs(), self.is_integer);
+                self.min_limit_input_text =
+                    Self::format_limit_value(-self.max_val.abs(), self.is_integer);
+            } else {
+                self.max_limit_input_text =
+                    Self::format_limit_value(self.max_val, self.is_integer);
+                self.min_limit_input_text =
+                    Self::format_limit_value(self.min_val, self.is_integer);
+            }
             self.texture_dirty = true;
         }
     }
