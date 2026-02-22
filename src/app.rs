@@ -42,7 +42,7 @@ struct CachedState {
 impl CachedState {
     fn from_widget(widget: &ArrayViewerWidget) -> Self {
         let cb = widget.current_contrast_bias();
-        let (vmin, vmax) = widget.value_range();
+        let (vmin, vmax) = widget.display_value_range();
         let transform = widget.transform();
         let (pivot_x, pivot_y) = widget.pivot_point();
         Self {

@@ -183,6 +183,14 @@ impl Default for ArrayViewerWidget {
 }
 
 impl ArrayViewerWidget {
+    fn format_limit_value(value: f64, is_int: bool) -> String {
+        if is_int {
+            format!("{}", value as i64)
+        } else {
+            format_scientific(value)
+        }
+    }
+
     /// Compute auto display limits from pixel data, ignoring NaNs/Infs.
     fn auto_limits_from_pixels(pixels: &[f64]) -> (f64, f64) {
         let mut min_val = f64::INFINITY;
@@ -218,16 +226,8 @@ impl ArrayViewerWidget {
             self.original_min_val = min_val;
             self.original_max_val = max_val;
         }
-        self.min_limit_input_text = if self.is_integer {
-            format!("{}", self.min_val as i64)
-        } else {
-            format_scientific(self.min_val)
-        };
-        self.max_limit_input_text = if self.is_integer {
-            format!("{}", self.max_val as i64)
-        } else {
-            format_scientific(self.max_val)
-        };
+        self.min_limit_input_text = Self::format_limit_value(self.min_val, self.is_integer);
+        self.max_limit_input_text = Self::format_limit_value(self.max_val, self.is_integer);
     }
 
     /// Create a new empty widget
@@ -634,7 +634,7 @@ impl ArrayViewerWidget {
     /// Get the scaling range based on symmetric mode
     fn scaling_range(&self) -> (f64, f64) {
         if self.symmetric_mode {
-            let abs_max = self.min_val.abs().max(self.max_val.abs());
+            let abs_max = self.max_val.abs();
             (-abs_max, abs_max)
         } else {
             (self.min_val, self.max_val)
@@ -657,27 +657,37 @@ impl ArrayViewerWidget {
         (self.min_val, self.max_val)
     }
 
+    /// Get effective display limits used by rendering.
+    pub fn display_value_range(&self) -> (f64, f64) {
+        self.scaling_range()
+    }
+
     /// Set the min value for scaling (marks texture dirty)
     pub fn set_min_val(&mut self, min_val: f64) {
         if (self.min_val - min_val).abs() > 1e-15 {
             self.min_val = min_val;
-            self.min_limit_input_text = format_scientific(min_val);
+            self.min_limit_input_text = Self::format_limit_value(min_val, self.is_integer);
             self.texture_dirty = true;
         }
     }
 
     /// Set the max value for scaling (marks texture dirty)
-    pub fn set_max_val(&mut self, max_val: f64) {
+    pub fn set_max_val(&mut self, mut max_val: f64) {
+        if self.symmetric_mode {
+            max_val = max_val.abs();
+        }
         if (self.max_val - max_val).abs() > 1e-15 {
             self.max_val = max_val;
-            self.max_limit_input_text = format_scientific(max_val);
+            self.max_limit_input_text = Self::format_limit_value(max_val, self.is_integer);
             self.texture_dirty = true;
         }
     }
 
     /// Set both min and max values at once
     pub fn set_value_range(&mut self, min_val: f64, max_val: f64) {
-        self.set_min_val(min_val);
+        if !self.symmetric_mode {
+            self.set_min_val(min_val);
+        }
         self.set_max_val(max_val);
     }
 
@@ -1397,6 +1407,7 @@ impl ArrayViewerWidget {
             .show(ctx, |ui| {
                 let text_color = get_overlay_text_color(ui);
                 let is_dark = ui.visuals().dark_mode;
+                let is_symmetric = self.is_symmetric();
                 
                 let edit_bg = if is_dark {
                     egui::Color32::from_black_alpha(180)
@@ -1427,15 +1438,14 @@ impl ArrayViewerWidget {
                 
                 if max_response.lost_focus() || (max_response.has_focus() && ui.input(|i| i.key_pressed(Key::Enter))) {
                     if let Ok(new_val) = self.max_limit_input_text.trim().parse::<f64>() {
-                        if (self.max_val - new_val).abs() > 1e-15 {
-                            self.max_val = new_val;
-                            self.texture_dirty = true;
-                        }
+                        let parsed = if is_symmetric { new_val.abs() } else { new_val };
+                        self.set_max_val(parsed);
+                        self.max_limit_input_text = Self::format_limit_value(parsed, is_int);
                     } else {
-                        self.max_limit_input_text = if is_int {
-                            format!("{}", self.max_val as i64)
+                        self.max_limit_input_text = if is_symmetric {
+                            Self::format_limit_value(self.max_val.abs(), is_int)
                         } else {
-                            format_scientific(self.max_val)
+                            Self::format_limit_value(self.max_val, is_int)
                         };
                     }
                 }
@@ -1450,6 +1460,11 @@ impl ArrayViewerWidget {
             .show(ctx, |ui| {
                 let text_color = get_overlay_text_color(ui);
                 let is_dark = ui.visuals().dark_mode;
+                let is_symmetric = self.is_symmetric();
+                if is_symmetric {
+                    self.min_limit_input_text =
+                        Self::format_limit_value(-self.max_val.abs(), is_int);
+                }
                 
                 let edit_bg = if is_dark {
                     egui::Color32::from_black_alpha(180)
@@ -1476,23 +1491,23 @@ impl ArrayViewerWidget {
                     .horizontal_align(egui::Align::Center)
                     .text_color(text_color)
                     .font(egui::FontId::proportional(13.0));
-                let min_response = ui.add(min_edit);
+                let min_response = ui.add_enabled(!is_symmetric, min_edit);
                 
-                if min_response.lost_focus() || (min_response.has_focus() && ui.input(|i| i.key_pressed(Key::Enter))) {
+                if !is_symmetric
+                    && (min_response.lost_focus()
+                        || (min_response.has_focus() && ui.input(|i| i.key_pressed(Key::Enter))))
+                {
                     if let Ok(new_val) = self.min_limit_input_text.trim().parse::<f64>() {
-                        if (self.min_val - new_val).abs() > 1e-15 {
-                            self.min_val = new_val;
-                            self.texture_dirty = true;
-                        }
+                        self.set_min_val(new_val);
                     } else {
-                        self.min_limit_input_text = if is_int {
-                            format!("{}", self.min_val as i64)
-                        } else {
-                            format_scientific(self.min_val)
-                        };
+                        self.min_limit_input_text = Self::format_limit_value(self.min_val, is_int);
                     }
                 }
-                min_response.on_hover_text("Minimum display value");
+                min_response.on_hover_text(if is_symmetric {
+                    "Symmetric mode: vmin is derived from -vmax"
+                } else {
+                    "Minimum display value"
+                });
             });
         
         // Lock button below the colorbar - compact with theme background

@@ -92,6 +92,8 @@ This package is designed to be used as the image viewer backend for [jupyterlab-
 
 ### Since last release
 
+- Fixed diverging/symmetric colorbar limit behavior: `vmax` is now the sole editable limit, coerced positive, while `vmin` is disabled and displayed as `-vmax` without mutating underlying `min_val`.
+- Fixed reported `vmin`/`vmax` values from state callbacks and `getValueRange()` to reflect effective display limits in diverging/symmetric mode.
 - Added bulk state application via `setViewerState(...)` in the JS API for applying partial viewer configuration in one call.
 - Added explicit JS/TS APIs for zoom and colormap control: `getZoom`/`setZoom`, `setColormap`, and `setColormapReversed`.
 - Improved TypeScript typings with `StretchMode` and `ViewerStateConfig` to make state sync calls type-safe.

@@ -467,7 +467,7 @@ impl ViewerHandle {
     #[wasm_bindgen(js_name = getValueRange)]
     pub fn get_value_range(&self) -> js_sys::Float64Array {
         let widget = self.widget.borrow();
-        let (min_val, max_val) = widget.value_range();
+        let (min_val, max_val) = widget.display_value_range();
         let result = js_sys::Float64Array::new_with_length(2);
         result.copy_from(&[min_val, max_val]);
         result
